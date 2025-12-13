@@ -1,6 +1,7 @@
 {
   "cookie": "PASTE_YOUR_COOKIE_HERE",
   "authorization": "",
+  "batch_delay_ms": 100,
   "orders": [
     {
       "orderSide": "Buy",

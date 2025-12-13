@@ -10,6 +10,12 @@ struct Config {
     #[serde(default)]
     authorization: String,
     orders: Vec<OrderData>,
+    #[serde(default = "default_batch_delay")]
+    batch_delay_ms: u64,
+}
+
+fn default_batch_delay() -> u64 {
+    100  // Default 100ms between batches
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -60,9 +66,11 @@ async fn main() -> Result<()> {
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
+    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
     println!("Starting continuous order sending (non-blocking mode)...\n");
 
     let mut batch_number = 0u64;
+    let batch_delay = config.batch_delay_ms;
 
     loop {
         batch_number += 1;
@@ -74,6 +82,7 @@ async fn main() -> Result<()> {
                 cookie: config.cookie.clone(),
                 authorization: config.authorization.clone(),
                 orders: vec![],  // Not needed in the clone
+                batch_delay_ms: config.batch_delay_ms,
             };
             let order_clone = order.clone();
             let batch = batch_number;
@@ -91,8 +100,8 @@ async fn main() -> Result<()> {
             });
         }
 
-        // Small delay before sending next batch (adjust as needed)
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Delay before sending next batch (configured in config.json)
+        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
     }
 }
 

@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use futures::future::join_all;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -61,12 +60,15 @@ async fn main() -> Result<()> {
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
+    println!("Starting continuous order sending (non-blocking mode)...\n");
+
+    let mut batch_number = 0u64;
 
     loop {
-        println!("\n=== Sending {} orders in parallel ===", config.orders.len());
+        batch_number += 1;
+        println!("=== Batch #{}: Sending {} orders in parallel ===", batch_number, config.orders.len());
 
         // Create tasks for all orders
-        let mut tasks = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
             let config_clone = Config {
                 cookie: config.cookie.clone(),
@@ -74,45 +76,23 @@ async fn main() -> Result<()> {
                 orders: vec![],  // Not needed in the clone
             };
             let order_clone = order.clone();
+            let batch = batch_number;
 
-            tasks.push(tokio::spawn(async move {
-                (index, send_order(&config_clone, &order_clone).await)
-            }));
+            // Spawn each order as a separate task that handles its own result
+            tokio::spawn(async move {
+                match send_order(&config_clone, &order_clone).await {
+                    Ok(_) => {
+                        println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1);
+                    }
+                    Err(e) => {
+                        eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e);
+                    }
+                }
+            });
         }
 
-        // Wait for all orders to complete
-        let results = join_all(tasks).await;
-
-        // Process results
-        let mut success_count = 0;
-        let mut error_count = 0;
-
-        for result in results {
-            match result {
-                Ok((index, Ok(_))) => {
-                    println!("✓ Order #{} sent successfully", index + 1);
-                    success_count += 1;
-                }
-                Ok((index, Err(e))) => {
-                    eprintln!("✗ Order #{} failed: {}", index + 1, e);
-                    error_count += 1;
-                }
-                Err(e) => {
-                    eprintln!("✗ Task error: {}", e);
-                    error_count += 1;
-                }
-            }
-        }
-
-        println!("\n=== Summary: {} successful, {} failed ===", success_count, error_count);
-
-        if error_count > 0 {
-            println!("Retrying in 5 seconds...");
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        } else {
-            println!("Waiting 1 second before next batch...");
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        }
+        // Small delay before sending next batch (adjust as needed)
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 }
 

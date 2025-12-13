@@ -1,0 +1,14 @@
+{
+  "cookie": "PASTE_YOUR_COOKIE_HERE",
+  "authorization": "",
+  "order": {
+    "orderSide": "Buy",
+    "price": 8656,
+    "quantity": 1,
+    "symbolIsin": "IRO3HANI0001",
+    "validityType": 0,
+    "validityDate": null,
+    "orderFrom": "Titan"
+  }
+}
+

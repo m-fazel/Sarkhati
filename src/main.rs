@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use futures::future::join_all;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -9,10 +10,10 @@ struct Config {
     cookie: String,
     #[serde(default)]
     authorization: String,
-    order: OrderData,
+    orders: Vec<OrderData>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct OrderData {
     #[serde(rename = "orderSide")]
     order_side: String,
@@ -54,18 +55,63 @@ async fn main() -> Result<()> {
         anyhow::bail!("No authentication method configured. Please set either 'cookie' or 'authorization' in config.json");
     }
 
+    // Validate that we have at least one order
+    if config.orders.is_empty() {
+        anyhow::bail!("No orders configured in config.json. Please add at least one order to the 'orders' array.");
+    }
+
+    println!("Loaded {} order(s) from config", config.orders.len());
+
     loop {
-        match send_order(&config, &config.order).await {
-            Ok(_) => {
-                println!("✓ Order sent successfully");
-                println!("Waiting 1 second before next order...");
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        println!("\n=== Sending {} orders in parallel ===", config.orders.len());
+
+        // Create tasks for all orders
+        let mut tasks = Vec::new();
+        for (index, order) in config.orders.iter().enumerate() {
+            let config_clone = Config {
+                cookie: config.cookie.clone(),
+                authorization: config.authorization.clone(),
+                orders: vec![],  // Not needed in the clone
+            };
+            let order_clone = order.clone();
+
+            tasks.push(tokio::spawn(async move {
+                (index, send_order(&config_clone, &order_clone).await)
+            }));
+        }
+
+        // Wait for all orders to complete
+        let results = join_all(tasks).await;
+
+        // Process results
+        let mut success_count = 0;
+        let mut error_count = 0;
+
+        for result in results {
+            match result {
+                Ok((index, Ok(_))) => {
+                    println!("✓ Order #{} sent successfully", index + 1);
+                    success_count += 1;
+                }
+                Ok((index, Err(e))) => {
+                    eprintln!("✗ Order #{} failed: {}", index + 1, e);
+                    error_count += 1;
+                }
+                Err(e) => {
+                    eprintln!("✗ Task error: {}", e);
+                    error_count += 1;
+                }
             }
-            Err(e) => {
-                eprintln!("✗ Error sending order: {}", e);
-                println!("Retrying in 5 seconds...");
-                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-            }
+        }
+
+        println!("\n=== Summary: {} successful, {} failed ===", success_count, error_count);
+
+        if error_count > 0 {
+            println!("Retrying in 5 seconds...");
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        } else {
+            println!("Waiting 1 second before next batch...");
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
     }
 }

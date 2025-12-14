@@ -147,7 +147,7 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
     // Serialize order data
     let order_json = serde_json::to_string(order)?;
 
-    println!("Sending order: {:?}", order);
+    println!("Sending order JSON: {}", order_json);
 
     // Send POST request
     let response = client.post(ORDER_URL)

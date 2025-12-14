@@ -125,7 +125,7 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
 
     headers.insert(ORIGIN, HeaderValue::from_static("https://tg.mofidonline.com"));
     headers.insert(REFERER, HeaderValue::from_static("https://tg.mofidonline.com/"));
-    headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36"));
+    headers.insert(USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0'"));
     headers.insert("x-appname", HeaderValue::from_static("titan"));
     headers.insert("DNT", HeaderValue::from_static("1"));
 

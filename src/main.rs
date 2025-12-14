@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::fs;
 
@@ -122,7 +122,6 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
     headers.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.5"));
     headers.insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br, zstd"));
     headers.insert(REFERER, HeaderValue::from_static("https://tg.mofidonline.com/"));
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
     // Add authentication - prefer cookie if available, otherwise use authorization
     let use_cookie = !config.cookie.is_empty() && config.cookie != "PASTE_YOUR_COOKIE_HERE";
@@ -146,10 +145,15 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
 
     // Serialize order data
     let order_json = serde_json::to_string(order)?;
+    let body_bytes = order_json.as_bytes();
+
+    // Set Content-Type and Content-Length headers
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(CONTENT_LENGTH, HeaderValue::from_str(&body_bytes.len().to_string())?);
 
     println!("Sending order JSON: {}", order_json);
 
-    // Send POST request
+    // Send POST request with body
     let response = client.post(ORDER_URL)
         .headers(headers)
         .body(order_json)
@@ -159,8 +163,12 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
     let status = response.status();
     let response_text = response.text().await?;
 
-    // Decode Unicode escape sequences to make Persian/Farsi text readable
-    let decoded_text = decode_unicode_escapes(&response_text);
+    // Decode Unicode escape sequences only if they exist in the response
+    let decoded_text = if response_text.contains("\\u") {
+        decode_unicode_escapes(&response_text)
+    } else {
+        response_text.clone()
+    };
 
     println!("Order response status: {}", status);
     println!("Order response body: {}", decoded_text);

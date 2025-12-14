@@ -119,8 +119,8 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
     headers.insert(ACCEPT, HeaderValue::from_static("application/json, text/plain, */*"));
-    headers.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.5"))?;
-    headers.insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br, zstd"))?;
+    headers.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.5"));
+    headers.insert("Accept-Encoding", HeaderValue::from_static("gzip, deflate, br, zstd"));
     headers.insert(REFERER, HeaderValue::from_static("https://tg.mofidonline.com/"));
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
@@ -134,15 +134,15 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
         headers.insert(AUTHORIZATION, HeaderValue::from_str(&auth_value)?);
     }
 
-    headers.insert("x-appname", HeaderValue::from_static("titan"))?;
-    headers.insert(ORIGIN, HeaderValue::from_static("https://tg.mofidonline.com"))?;
-    headers.insert("Connection", HeaderValue::from_static("keep-alive"))?;
-    headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("empty"))?;
-    headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("cors"))?;
-    headers.insert("Sec-Fetch-Site", HeaderValue::from_static("same-site"))?;
-    headers.insert("Priority", HeaderValue::from_static("u=0"))?;
-    headers.insert("Pragma", HeaderValue::from_static("no-cache"))?;
-    headers.insert("Cache-Control", HeaderValue::from_static("no-cache"))?;
+    headers.insert("x-appname", HeaderValue::from_static("titan"));
+    headers.insert(ORIGIN, HeaderValue::from_static("https://tg.mofidonline.com"));
+    headers.insert("Connection", HeaderValue::from_static("keep-alive"));
+    headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("empty"));
+    headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("cors"));
+    headers.insert("Sec-Fetch-Site", HeaderValue::from_static("same-site"));
+    headers.insert("Priority", HeaderValue::from_static("u=0"));
+    headers.insert("Pragma", HeaderValue::from_static("no-cache"));
+    headers.insert("Cache-Control", HeaderValue::from_static("no-cache"));
 
     // Serialize order data
     let order_json = serde_json::to_string(order)?;

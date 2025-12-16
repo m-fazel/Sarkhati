@@ -11,6 +11,8 @@ struct Config {
     authorization: String,
     #[serde(default = "default_user_agent")]
     user_agent: String,
+    #[serde(default = "default_order_url")]
+    order_url: String,
     orders: Vec<OrderData>,
     #[serde(default = "default_batch_delay")]
     batch_delay_ms: u64,
@@ -18,6 +20,10 @@ struct Config {
 
 fn default_user_agent() -> String {
     "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0".to_string()
+}
+
+fn default_order_url() -> String {
+    "https://mofidonline.com/apigateway/api/v1/Order/send".to_string()
 }
 
 fn default_batch_delay() -> u64 {
@@ -39,8 +45,6 @@ struct OrderData {
     #[serde(rename = "orderFrom")]
     order_from: String,
 }
-
-const ORDER_URL: &str = "https://mofidonline.com/apigateway/api/v1/Order/send";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -155,7 +159,7 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
     println!("Sending order JSON: {}", order_json);
 
     // Send POST request with body
-    let response = client.post(ORDER_URL)
+    let response = client.post(&config.order_url)
         .headers(headers)
         .body(order_json)
         .send()

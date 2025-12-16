@@ -3,15 +3,13 @@ use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_L
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct ExirConfig {
+pub struct OrdibeheshtConfig {
     pub cookie: String,
     #[serde(default = "default_user_agent")]
     pub user_agent: String,
     #[serde(default = "default_order_url")]
     pub order_url: String,
-    #[serde(default = "default_x_app_n")]
-    pub x_app_n: String,
-    pub orders: Vec<ExirOrderData>,
+    pub orders: Vec<OrdibeheshtOrderData>,
     #[serde(default = "default_batch_delay")]
     pub batch_delay_ms: u64,
 }
@@ -21,11 +19,7 @@ fn default_user_agent() -> String {
 }
 
 fn default_order_url() -> String {
-    "https://arzeshafarin.exirbroker.com/api/v1/order".to_string()
-}
-
-fn default_x_app_n() -> String {
-    "1824632377792.35566496".to_string()
+    "https://api.oibourse.ir/Web/V1/Order/Post".to_string()
 }
 
 fn default_batch_delay() -> u64 {
@@ -33,44 +27,56 @@ fn default_batch_delay() -> u64 {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ExirOrderData {
-    #[serde(rename = "insMaxLcode")]
-    pub ins_max_lcode: String,
-    #[serde(rename = "bankAccountId")]
-    pub bank_account_id: i64,
-    pub side: String,
-    #[serde(rename = "orderType")]
-    pub order_type: String,
-    pub quantity: i64,
-    pub price: i64,
-    #[serde(rename = "validityType")]
-    pub validity_type: String,
-    #[serde(rename = "validityDate")]
-    pub validity_date: String,
-    #[serde(rename = "coreType")]
-    pub core_type: String,
-    #[serde(rename = "hasUnderCautionAgreement")]
-    pub has_under_caution_agreement: bool,
-    #[serde(rename = "dividedOrder")]
-    pub divided_order: bool,
+pub struct OrdibeheshtOrderData {
+    #[serde(rename = "IsSymbolCautionAgreement")]
+    pub is_symbol_caution_agreement: bool,
+    #[serde(rename = "CautionAgreementSelected")]
+    pub caution_agreement_selected: bool,
+    #[serde(rename = "IsSymbolSepahAgreement")]
+    pub is_symbol_sepah_agreement: bool,
+    #[serde(rename = "SepahAgreementSelected")]
+    pub sepah_agreement_selected: bool,
+    #[serde(rename = "orderCount")]
+    pub order_count: i64,
+    #[serde(rename = "orderPrice")]
+    pub order_price: i64,
+    #[serde(rename = "FinancialProviderId")]
+    pub financial_provider_id: i32,
+    #[serde(rename = "minimumQuantity")]
+    pub minimum_quantity: i64,
+    #[serde(rename = "maxShow")]
+    pub max_show: i64,
+    #[serde(rename = "orderId")]
+    pub order_id: i64,
+    pub isin: String,
+    #[serde(rename = "orderSide")]
+    pub order_side: i32,
+    #[serde(rename = "orderValidity")]
+    pub order_validity: i32,
+    #[serde(rename = "orderValiditydate")]
+    pub order_validity_date: Option<String>,
+    #[serde(rename = "shortSellIsEnabled")]
+    pub short_sell_is_enabled: bool,
+    #[serde(rename = "shortSellIncentivePercent")]
+    pub short_sell_incentive_percent: i32,
 }
 
-pub async fn send_order(config: &ExirConfig, order: &ExirOrderData) -> Result<()> {
+pub async fn send_order(config: &OrdibeheshtConfig, order: &OrdibeheshtOrderData) -> Result<()> {
     let client = reqwest::Client::new();
 
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
-    headers.insert(ACCEPT, HeaderValue::from_static("application/json, text/plain, */*"));
+    headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
     headers.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.5"));
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br, zstd"));
-    headers.insert(REFERER, HeaderValue::from_static("https://arzeshafarin.exirbroker.com/exir/mainNew"));
-    headers.insert("X-App-N", HeaderValue::from_str(&config.x_app_n)?);
-    headers.insert(ORIGIN, HeaderValue::from_static("https://arzeshafarin.exirbroker.com"));
+    headers.insert("X-Requested-With", HeaderValue::from_static("XMLHttpRequest"));
+    headers.insert(ORIGIN, HeaderValue::from_static("https://online.oibourse.ir"));
     headers.insert("Connection", HeaderValue::from_static("keep-alive"));
+    headers.insert(REFERER, HeaderValue::from_static("https://online.oibourse.ir/"));
     headers.insert(COOKIE, HeaderValue::from_str(&config.cookie)?);
     headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("empty"));
     headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("cors"));
-    headers.insert("Sec-Fetch-Site", HeaderValue::from_static("same-origin"));
+    headers.insert("Sec-Fetch-Site", HeaderValue::from_static("same-site"));
     headers.insert("Priority", HeaderValue::from_static("u=0"));
     headers.insert("Pragma", HeaderValue::from_static("no-cache"));
     headers.insert("Cache-Control", HeaderValue::from_static("no-cache"));

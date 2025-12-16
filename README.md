@@ -7,8 +7,8 @@ A Rust application that automatically sends trading orders to Iranian stock brok
 - **Mofid Online** (mofid) - https://tg.mofidonline.com
 - **BMI Bourse** (bmi) - https://online.bmibourse.ir
 - **Danayan** (danayan) - https://trader.danayan.broker
-- **OI Bourse** (oi) - https://online.oibourse.ir
-- **Exir Broker** (exir) - https://arzeshafarin.exirbroker.com
+- **Ordibehesht** (ordibehesht) - https://online.oibourse.ir
+- **Alvand** (alvand) - https://arzeshafarin.exirbroker.com
 
 ## Features
 
@@ -41,11 +41,11 @@ cp config_bmi.example.json config_bmi.json
 # For Danayan
 cp config_danayan.example.json config_danayan.json
 
-# For OI Bourse
-cp config_oi.example.json config_oi.json
+# For Ordibehesht
+cp config_ordibehesht.example.json config_ordibehesht.json
 
-# For Exir Broker
-cp config_exir.example.json config_exir.json
+# For Alvand
+cp config_alvand.example.json config_alvand.json
 ```
 
 ### 2. Get your authentication credentials
@@ -66,11 +66,11 @@ cargo run --release -- bmi
 # For Danayan
 cargo run --release -- danayan
 
-# For OI Bourse
-cargo run --release -- oi
+# For Ordibehesht
+cargo run --release -- ordibehesht
 
-# For Exir Broker
-cargo run --release -- exir
+# For Alvand
+cargo run --release -- alvand
 
 # For ALL brokers in parallel
 cargo run --release -- all
@@ -196,7 +196,7 @@ Press `Ctrl+C` to stop.
 | `orderPaymentGateway` | Usually `1` |
 | `disclosedQuantity` | Disclosed quantity (`null` for all) |
 
-### OI Bourse (`config_oi.json`)
+### Ordibehesht (`config_ordibehesht.json`)
 
 ```json
 {
@@ -227,7 +227,7 @@ Press `Ctrl+C` to stop.
 }
 ```
 
-#### OI Bourse Order Parameters
+#### Ordibehesht Order Parameters
 
 | Field | Description |
 |-------|-------------|
@@ -241,7 +241,7 @@ Press `Ctrl+C` to stop.
 | `minimumQuantity` | Minimum fill quantity (`0` for any) |
 | `maxShow` | Max visible quantity (`0` for all) |
 
-### Exir Broker (`config_exir.json`)
+### Alvand (`config_alvand.json`)
 
 ```json
 {
@@ -268,7 +268,7 @@ Press `Ctrl+C` to stop.
 }
 ```
 
-#### Exir Broker Order Parameters
+#### Alvand Order Parameters
 
 | Field | Description |
 |-------|-------------|
@@ -335,9 +335,9 @@ Danayan uses **Cookie** authentication (contains embedded Authorization token).
 6. Copy the entire cookie string (includes `Authorization=Bearer%20...`)
 7. Paste in `config_danayan.json` → `cookie` field
 
-### OI Bourse
+### Ordibehesht
 
-OI Bourse uses **Cookie** authentication only.
+Ordibehesht uses **Cookie** authentication only.
 
 1. Open Chrome and go to https://online.oibourse.ir/
 2. Log in with your credentials
@@ -345,11 +345,11 @@ OI Bourse uses **Cookie** authentication only.
 4. Look for requests to `api.oibourse.ir`
 5. Find `Cookie:` in Request Headers
 6. Copy the entire cookie string
-7. Paste in `config_oi.json` → `cookie` field
+7. Paste in `config_ordibehesht.json` → `cookie` field
 
-### Exir Broker
+### Alvand
 
-Exir Broker uses **Cookie** authentication (contains JWT-TOKEN).
+Alvand uses **Cookie** authentication (contains JWT-TOKEN).
 
 1. Open Chrome and go to https://arzeshafarin.exirbroker.com/
 2. Log in with your credentials
@@ -357,7 +357,7 @@ Exir Broker uses **Cookie** authentication (contains JWT-TOKEN).
 4. Look for requests to `arzeshafarin.exirbroker.com/api`
 5. Find `Cookie:` in Request Headers
 6. Copy the entire cookie string (includes `JWT-TOKEN=...`)
-7. Paste in `config_exir.json` → `cookie` field
+7. Paste in `config_alvand.json` → `cookie` field
 
 ---
 
@@ -376,11 +376,11 @@ cargo run --release -- bmi
 # Run for Danayan
 cargo run --release -- danayan
 
-# Run for OI Bourse
-cargo run --release -- oi
+# Run for Ordibehesht
+cargo run --release -- ordibehesht
 
-# Run for Exir Broker
-cargo run --release -- exir
+# Run for Alvand
+cargo run --release -- alvand
 
 # Run ALL brokers in parallel
 cargo run --release -- all

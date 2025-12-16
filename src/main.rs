@@ -2,19 +2,19 @@ use anyhow::{Context, Result};
 use std::env;
 use std::fs;
 
+mod alvand;
 mod bmi;
 mod danayan;
-mod exir;
 mod mofid;
-mod oi;
+mod ordibehesht;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Broker {
     Mofid,
     Bmi,
     Danayan,
-    Oi,
-    Exir,
+    Ordibehesht,
+    Alvand,
     All,
 }
 
@@ -26,16 +26,16 @@ async fn main() -> Result<()> {
         Some("mofid") => Broker::Mofid,
         Some("bmi") => Broker::Bmi,
         Some("danayan") => Broker::Danayan,
-        Some("oi") => Broker::Oi,
-        Some("exir") => Broker::Exir,
+        Some("ordibehesht") => Broker::Ordibehesht,
+        Some("alvand") => Broker::Alvand,
         Some("all") => Broker::All,
         Some(other) => {
             eprintln!("Unknown broker: {}", other);
-            eprintln!("Usage: {} <mofid|bmi|danayan|oi|exir|all>", args[0]);
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|all>", args[0]);
             std::process::exit(1);
         }
         None => {
-            eprintln!("Usage: {} <mofid|bmi|danayan|oi|exir|all>", args[0]);
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|all>", args[0]);
             std::process::exit(1);
         }
     };
@@ -44,8 +44,8 @@ async fn main() -> Result<()> {
         Broker::Mofid => run_mofid().await,
         Broker::Bmi => run_bmi().await,
         Broker::Danayan => run_danayan().await,
-        Broker::Oi => run_oi().await,
-        Broker::Exir => run_exir().await,
+        Broker::Ordibehesht => run_ordibehesht().await,
+        Broker::Alvand => run_alvand().await,
         Broker::All => run_all().await,
     }
 }
@@ -71,19 +71,19 @@ async fn run_all() -> Result<()> {
         }
     });
 
-    let oi_handle = tokio::spawn(async {
-        if let Err(e) = run_oi().await {
-            eprintln!("[OI] Error: {}", e);
+    let ordibehesht_handle = tokio::spawn(async {
+        if let Err(e) = run_ordibehesht().await {
+            eprintln!("[Ordibehesht] Error: {}", e);
         }
     });
 
-    let exir_handle = tokio::spawn(async {
-        if let Err(e) = run_exir().await {
-            eprintln!("[Exir] Error: {}", e);
+    let alvand_handle = tokio::spawn(async {
+        if let Err(e) = run_alvand().await {
+            eprintln!("[Alvand] Error: {}", e);
         }
     });
 
-    let _ = tokio::join!(mofid_handle, bmi_handle, danayan_handle, oi_handle, exir_handle);
+    let _ = tokio::join!(mofid_handle, bmi_handle, danayan_handle, ordibehesht_handle, alvand_handle);
 
     Ok(())
 }
@@ -235,23 +235,23 @@ async fn run_danayan() -> Result<()> {
     }
 }
 
-async fn run_oi() -> Result<()> {
-    let config_str = fs::read_to_string("config_oi.json")
-        .context("Failed to read config_oi.json")?;
-    let config: oi::OiConfig = serde_json::from_str(&config_str)
-        .context("Failed to parse config_oi.json")?;
+async fn run_ordibehesht() -> Result<()> {
+    let config_str = fs::read_to_string("config_ordibehesht.json")
+        .context("Failed to read config_ordibehesht.json")?;
+    let config: ordibehesht::OrdibeheshtConfig = serde_json::from_str(&config_str)
+        .context("Failed to parse config_ordibehesht.json")?;
 
-    println!("Starting Sarkhati - OI Bourse Order Sender");
+    println!("Starting Sarkhati - Ordibehesht Order Sender");
 
     if config.cookie.is_empty() {
-        anyhow::bail!("Cookie is required for OI Bourse. Please set 'cookie' in config_oi.json");
+        anyhow::bail!("Cookie is required for Ordibehesht. Please set 'cookie' in config_ordibehesht.json");
     }
 
     println!("Using Cookie authentication");
     println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
 
     if config.orders.is_empty() {
-        anyhow::bail!("No orders configured in config_oi.json.");
+        anyhow::bail!("No orders configured in config_ordibehesht.json.");
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
@@ -271,7 +271,7 @@ async fn run_oi() -> Result<()> {
             let batch = batch_number;
 
             tokio::spawn(async move {
-                match oi::send_order(&config_clone, &order_clone).await {
+                match ordibehesht::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -282,23 +282,23 @@ async fn run_oi() -> Result<()> {
     }
 }
 
-async fn run_exir() -> Result<()> {
-    let config_str = fs::read_to_string("config_exir.json")
-        .context("Failed to read config_exir.json")?;
-    let config: exir::ExirConfig = serde_json::from_str(&config_str)
-        .context("Failed to parse config_exir.json")?;
+async fn run_alvand() -> Result<()> {
+    let config_str = fs::read_to_string("config_alvand.json")
+        .context("Failed to read config_alvand.json")?;
+    let config: alvand::AlvandConfig = serde_json::from_str(&config_str)
+        .context("Failed to parse config_alvand.json")?;
 
-    println!("Starting Sarkhati - Exir Broker Order Sender");
+    println!("Starting Sarkhati - Alvand Order Sender");
 
     if config.cookie.is_empty() {
-        anyhow::bail!("Cookie is required for Exir Broker. Please set 'cookie' in config_exir.json");
+        anyhow::bail!("Cookie is required for Alvand. Please set 'cookie' in config_alvand.json");
     }
 
     println!("Using Cookie authentication");
     println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
 
     if config.orders.is_empty() {
-        anyhow::bail!("No orders configured in config_exir.json.");
+        anyhow::bail!("No orders configured in config_alvand.json.");
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
@@ -318,7 +318,7 @@ async fn run_exir() -> Result<()> {
             let batch = batch_number;
 
             tokio::spawn(async move {
-                match exir::send_order(&config_clone, &order_clone).await {
+                match alvand::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }

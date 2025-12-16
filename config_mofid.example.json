@@ -1,0 +1,19 @@
+{
+  "cookie": "",
+  "authorization": "PASTE_YOUR_BEARER_TOKEN_HERE",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "order_url": "https://mofidonline.com/apigateway/api/v1/Order/send",
+  "batch_delay_ms": 100,
+  "orders": [
+    {
+      "orderSide": "Buy",
+      "price": 2474,
+      "quantity": 1,
+      "symbolIsin": "IRO1NMAD0001",
+      "validityType": 0,
+      "validityDate": null,
+      "orderFrom": "Titan"
+    }
+  ]
+}
+

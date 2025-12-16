@@ -1,62 +1,101 @@
 use anyhow::{Context, Result};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
-use serde::{Deserialize, Serialize};
+use std::env;
 use std::fs;
 
-#[derive(Debug, Deserialize)]
-struct Config {
-    #[serde(default)]
-    cookie: String,
-    #[serde(default)]
-    authorization: String,
-    #[serde(default = "default_user_agent")]
-    user_agent: String,
-    #[serde(default = "default_order_url")]
-    order_url: String,
-    orders: Vec<OrderData>,
-    #[serde(default = "default_batch_delay")]
-    batch_delay_ms: u64,
-}
+mod bmi;
+mod danayan;
+mod exir;
+mod mofid;
+mod oi;
 
-fn default_user_agent() -> String {
-    "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0".to_string()
-}
-
-fn default_order_url() -> String {
-    "https://mofidonline.com/apigateway/api/v1/Order/send".to_string()
-}
-
-fn default_batch_delay() -> u64 {
-    100  // Default 100ms between batches
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct OrderData {
-    #[serde(rename = "orderSide")]
-    order_side: String,
-    price: i32,
-    quantity: i32,
-    #[serde(rename = "symbolIsin")]
-    symbol_isin: String,
-    #[serde(rename = "validityType")]
-    validity_type: i32,
-    #[serde(rename = "validityDate")]
-    validity_date: Option<String>,
-    #[serde(rename = "orderFrom")]
-    order_from: String,
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Broker {
+    Mofid,
+    Bmi,
+    Danayan,
+    Oi,
+    Exir,
+    All,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Load configuration
-    let config_str = fs::read_to_string("config.json")
-        .context("Failed to read config.json")?;
-    let config: Config = serde_json::from_str(&config_str)
-        .context("Failed to parse config.json")?;
+    let args: Vec<String> = env::args().collect();
 
-    println!("Starting Sarkhati - Order Sender");
+    let broker = match args.get(1).map(|s| s.as_str()) {
+        Some("mofid") => Broker::Mofid,
+        Some("bmi") => Broker::Bmi,
+        Some("danayan") => Broker::Danayan,
+        Some("oi") => Broker::Oi,
+        Some("exir") => Broker::Exir,
+        Some("all") => Broker::All,
+        Some(other) => {
+            eprintln!("Unknown broker: {}", other);
+            eprintln!("Usage: {} <mofid|bmi|danayan|oi|exir|all>", args[0]);
+            std::process::exit(1);
+        }
+        None => {
+            eprintln!("Usage: {} <mofid|bmi|danayan|oi|exir|all>", args[0]);
+            std::process::exit(1);
+        }
+    };
 
-    // Determine authentication method
+    match broker {
+        Broker::Mofid => run_mofid().await,
+        Broker::Bmi => run_bmi().await,
+        Broker::Danayan => run_danayan().await,
+        Broker::Oi => run_oi().await,
+        Broker::Exir => run_exir().await,
+        Broker::All => run_all().await,
+    }
+}
+
+async fn run_all() -> Result<()> {
+    println!("Starting Sarkhati - All Brokers in Parallel\n");
+
+    let mofid_handle = tokio::spawn(async {
+        if let Err(e) = run_mofid().await {
+            eprintln!("[Mofid] Error: {}", e);
+        }
+    });
+
+    let bmi_handle = tokio::spawn(async {
+        if let Err(e) = run_bmi().await {
+            eprintln!("[BMI] Error: {}", e);
+        }
+    });
+
+    let danayan_handle = tokio::spawn(async {
+        if let Err(e) = run_danayan().await {
+            eprintln!("[Danayan] Error: {}", e);
+        }
+    });
+
+    let oi_handle = tokio::spawn(async {
+        if let Err(e) = run_oi().await {
+            eprintln!("[OI] Error: {}", e);
+        }
+    });
+
+    let exir_handle = tokio::spawn(async {
+        if let Err(e) = run_exir().await {
+            eprintln!("[Exir] Error: {}", e);
+        }
+    });
+
+    let _ = tokio::join!(mofid_handle, bmi_handle, danayan_handle, oi_handle, exir_handle);
+
+    Ok(())
+}
+
+async fn run_mofid() -> Result<()> {
+    let config_str = fs::read_to_string("config_mofid.json")
+        .context("Failed to read config_mofid.json")?;
+    let config: mofid::MofidConfig = serde_json::from_str(&config_str)
+        .context("Failed to parse config_mofid.json")?;
+
+    println!("Starting Sarkhati - Mofid Online Order Sender");
+
     let use_cookie = !config.cookie.is_empty() && config.cookie != "PASTE_YOUR_COOKIE_HERE";
     let use_auth = !config.authorization.is_empty();
 
@@ -70,124 +109,228 @@ async fn main() -> Result<()> {
         anyhow::bail!("No authentication method configured. Please set either 'cookie' or 'authorization' in config.json");
     }
 
-    // Validate that we have at least one order
     if config.orders.is_empty() {
-        anyhow::bail!("No orders configured in config.json. Please add at least one order to the 'orders' array.");
+        anyhow::bail!("No orders configured in config.json.");
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
     println!("Batch delay: {}ms between batches", config.batch_delay_ms);
-    println!("Starting continuous order sending (non-blocking mode)...\n");
+    println!("Starting continuous order sending...\n");
 
     let mut batch_number = 0u64;
     let batch_delay = config.batch_delay_ms;
 
     loop {
         batch_number += 1;
-        println!("=== Batch #{}: Sending {} orders in parallel ===", batch_number, config.orders.len());
+        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
 
-        // Create tasks for all orders
         for (index, order) in config.orders.iter().enumerate() {
-            let config_clone = Config {
-                cookie: config.cookie.clone(),
-                authorization: config.authorization.clone(),
-                user_agent: config.user_agent.clone(),
-                order_url: config.order_url.clone(),
-                orders: vec![],  // Not needed in the clone
-                batch_delay_ms: config.batch_delay_ms,
-            };
+            let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
 
-            // Spawn each order as a separate task that handles its own result
             tokio::spawn(async move {
-                match send_order(&config_clone, &order_clone).await {
-                    Ok(_) => {
-                        println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1);
-                    }
-                    Err(e) => {
-                        eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e);
-                    }
+                match mofid::send_order(&config_clone, &order_clone).await {
+                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
         }
 
-        // Delay before sending next batch (configured in config.json)
         tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
     }
 }
 
-async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
-    // Build client - reqwest automatically handles decompression
-    let client = reqwest::Client::new();
+async fn run_bmi() -> Result<()> {
+    let config_str = fs::read_to_string("config_bmi.json")
+        .context("Failed to read config_bmi.json")?;
+    let config: bmi::BmiConfig = serde_json::from_str(&config_str)
+        .context("Failed to parse config_bmi.json")?;
 
-    // Build headers
-    let mut headers = HeaderMap::new();
-    headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
-    headers.insert(ACCEPT, HeaderValue::from_static("application/json, text/plain, */*"));
-    headers.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.5"));
-    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br, zstd"));
-    headers.insert(REFERER, HeaderValue::from_static("https://tg.mofidonline.com/"));
+    println!("Starting Sarkhati - BMI Bourse Order Sender");
 
-    // Add authentication - prefer cookie if available, otherwise use authorization
-    let use_cookie = !config.cookie.is_empty() && config.cookie != "PASTE_YOUR_COOKIE_HERE";
-
-    if use_cookie {
-        headers.insert(COOKIE, HeaderValue::from_str(&config.cookie)?);
-    } else if !config.authorization.is_empty() {
-        let auth_value = format!("Bearer {}", config.authorization);
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&auth_value)?);
+    if config.cookie.is_empty() {
+        anyhow::bail!("Cookie is required for BMI Bourse. Please set 'cookie' in config.json");
     }
 
-    headers.insert("x-appname", HeaderValue::from_static("titan"));
-    headers.insert(ORIGIN, HeaderValue::from_static("https://tg.mofidonline.com"));
-    headers.insert("Connection", HeaderValue::from_static("keep-alive"));
-    headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("empty"));
-    headers.insert("Sec-Fetch-Mode", HeaderValue::from_static("cors"));
-    headers.insert("Sec-Fetch-Site", HeaderValue::from_static("same-site"));
-    headers.insert("Priority", HeaderValue::from_static("u=0"));
-    headers.insert("Pragma", HeaderValue::from_static("no-cache"));
-    headers.insert("Cache-Control", HeaderValue::from_static("no-cache"));
+    println!("Using Cookie authentication");
+    println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
 
-    // Serialize order data
-    let order_json = serde_json::to_string(order)?;
-    let body_bytes = order_json.as_bytes();
-
-    // Set Content-Type and Content-Length headers
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert(CONTENT_LENGTH, HeaderValue::from_str(&body_bytes.len().to_string())?);
-
-    println!("Sending order JSON: {}", order_json);
-
-    // Send POST request with body
-    let response = client.post(&config.order_url)
-        .headers(headers)
-        .body(order_json)
-        .send()
-        .await?;
-
-    let status = response.status();
-    let response_text = response.text().await?;
-
-    // Decode Unicode escape sequences only if they exist in the response
-    let decoded_text = if response_text.contains("\\u") {
-        decode_unicode_escapes(&response_text)
-    } else {
-        response_text.clone()
-    };
-
-    println!("Order response status: {}", status);
-    println!("Order response body: {}", decoded_text);
-
-    if !status.is_success() {
-        anyhow::bail!("Order failed with status {}: {}", status, decoded_text);
+    if config.orders.is_empty() {
+        anyhow::bail!("No orders configured in config.json.");
     }
 
-    Ok(())
+    println!("Loaded {} order(s) from config", config.orders.len());
+    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
+    println!("Starting continuous order sending...\n");
+
+    let mut batch_number = 0u64;
+    let batch_delay = config.batch_delay_ms;
+
+    loop {
+        batch_number += 1;
+        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+
+        for (index, order) in config.orders.iter().enumerate() {
+            let config_clone = config.clone();
+            let order_clone = order.clone();
+            let batch = batch_number;
+
+            tokio::spawn(async move {
+                match bmi::send_order(&config_clone, &order_clone).await {
+                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                }
+            });
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
+    }
+}
+
+async fn run_danayan() -> Result<()> {
+    let config_str = fs::read_to_string("config_danayan.json")
+        .context("Failed to read config_danayan.json")?;
+    let config: danayan::DanayanConfig = serde_json::from_str(&config_str)
+        .context("Failed to parse config_danayan.json")?;
+
+    println!("Starting Sarkhati - Danayan Order Sender");
+
+    if config.cookie.is_empty() {
+        anyhow::bail!("Cookie is required for Danayan. Please set 'cookie' in config_danayan.json");
+    }
+
+    println!("Using Cookie authentication");
+    println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
+
+    if config.orders.is_empty() {
+        anyhow::bail!("No orders configured in config_danayan.json.");
+    }
+
+    println!("Loaded {} order(s) from config", config.orders.len());
+    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
+    println!("Starting continuous order sending...\n");
+
+    let mut batch_number = 0u64;
+    let batch_delay = config.batch_delay_ms;
+
+    loop {
+        batch_number += 1;
+        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+
+        for (index, order) in config.orders.iter().enumerate() {
+            let config_clone = config.clone();
+            let order_clone = order.clone();
+            let batch = batch_number;
+
+            tokio::spawn(async move {
+                match danayan::send_order(&config_clone, &order_clone).await {
+                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                }
+            });
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
+    }
+}
+
+async fn run_oi() -> Result<()> {
+    let config_str = fs::read_to_string("config_oi.json")
+        .context("Failed to read config_oi.json")?;
+    let config: oi::OiConfig = serde_json::from_str(&config_str)
+        .context("Failed to parse config_oi.json")?;
+
+    println!("Starting Sarkhati - OI Bourse Order Sender");
+
+    if config.cookie.is_empty() {
+        anyhow::bail!("Cookie is required for OI Bourse. Please set 'cookie' in config_oi.json");
+    }
+
+    println!("Using Cookie authentication");
+    println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
+
+    if config.orders.is_empty() {
+        anyhow::bail!("No orders configured in config_oi.json.");
+    }
+
+    println!("Loaded {} order(s) from config", config.orders.len());
+    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
+    println!("Starting continuous order sending...\n");
+
+    let mut batch_number = 0u64;
+    let batch_delay = config.batch_delay_ms;
+
+    loop {
+        batch_number += 1;
+        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+
+        for (index, order) in config.orders.iter().enumerate() {
+            let config_clone = config.clone();
+            let order_clone = order.clone();
+            let batch = batch_number;
+
+            tokio::spawn(async move {
+                match oi::send_order(&config_clone, &order_clone).await {
+                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                }
+            });
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
+    }
+}
+
+async fn run_exir() -> Result<()> {
+    let config_str = fs::read_to_string("config_exir.json")
+        .context("Failed to read config_exir.json")?;
+    let config: exir::ExirConfig = serde_json::from_str(&config_str)
+        .context("Failed to parse config_exir.json")?;
+
+    println!("Starting Sarkhati - Exir Broker Order Sender");
+
+    if config.cookie.is_empty() {
+        anyhow::bail!("Cookie is required for Exir Broker. Please set 'cookie' in config_exir.json");
+    }
+
+    println!("Using Cookie authentication");
+    println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
+
+    if config.orders.is_empty() {
+        anyhow::bail!("No orders configured in config_exir.json.");
+    }
+
+    println!("Loaded {} order(s) from config", config.orders.len());
+    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
+    println!("Starting continuous order sending...\n");
+
+    let mut batch_number = 0u64;
+    let batch_delay = config.batch_delay_ms;
+
+    loop {
+        batch_number += 1;
+        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+
+        for (index, order) in config.orders.iter().enumerate() {
+            let config_clone = config.clone();
+            let order_clone = order.clone();
+            let batch = batch_number;
+
+            tokio::spawn(async move {
+                match exir::send_order(&config_clone, &order_clone).await {
+                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                }
+            });
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
+    }
 }
 
 /// Decode Unicode escape sequences (e.g., \u0645) to actual characters
-fn decode_unicode_escapes(s: &str) -> String {
+pub fn decode_unicode_escapes(s: &str) -> String {
     let mut result = String::new();
     let mut chars = s.chars().peekable();
 

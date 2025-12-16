@@ -1,0 +1,23 @@
+{
+  "cookie": "PASTE_YOUR_COOKIE_HERE",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "order_url": "https://arzeshafarin.exirbroker.com/api/v1/order",
+  "x_app_n": "1824632377792.35566496",
+  "batch_delay_ms": 100,
+  "orders": [
+    {
+      "insMaxLcode": "IRO1NMAD0001",
+      "bankAccountId": -1,
+      "side": "SIDE_BUY",
+      "orderType": "ORDER_TYPE_LIMIT",
+      "quantity": 1,
+      "price": 2474,
+      "validityType": "VALIDITY_TYPE_DAY",
+      "validityDate": "",
+      "coreType": "c",
+      "hasUnderCautionAgreement": false,
+      "dividedOrder": false
+    }
+  ]
+}
+

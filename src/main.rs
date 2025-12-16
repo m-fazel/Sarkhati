@@ -92,6 +92,7 @@ async fn main() -> Result<()> {
                 cookie: config.cookie.clone(),
                 authorization: config.authorization.clone(),
                 user_agent: config.user_agent.clone(),
+                order_url: config.order_url.clone(),
                 orders: vec![],  // Not needed in the clone
                 batch_delay_ms: config.batch_delay_ms,
             };

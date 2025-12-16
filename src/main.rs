@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, AUTHORIZATION, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 use std::fs;
 
@@ -122,11 +122,11 @@ async fn send_order(config: &Config, order: &OrderData) -> Result<()> {
     let client = reqwest::Client::new();
 
     // Build headers
-    // Note: Don't manually set Accept-Encoding - let reqwest handle it automatically
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
     headers.insert(ACCEPT, HeaderValue::from_static("application/json, text/plain, */*"));
     headers.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.5"));
+    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br, zstd"));
     headers.insert(REFERER, HeaderValue::from_static("https://tg.mofidonline.com/"));
 
     // Add authentication - prefer cookie if available, otherwise use authorization

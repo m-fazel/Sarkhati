@@ -93,8 +93,8 @@ pub async fn send_order(config: &BidarConfig, order: &BidarOrderData) -> Result<
         response_text.clone()
     };
 
-    println!("Order response status: {}", status);
-    println!("Order response body: {}", decoded_text);
+    println!("[Bidar] Order response status: {}", status);
+    println!("[Bidar] Order response body: {}", decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

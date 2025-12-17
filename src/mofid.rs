@@ -97,8 +97,8 @@ pub async fn send_order(config: &MofidConfig, order: &MofidOrderData) -> Result<
         response_text.clone()
     };
 
-    println!("Order response status: {}", status);
-    println!("Order response body: {}", decoded_text);
+    println!("[Mofid] Order response status: {}", status);
+    println!("[Mofid] Order response body: {}", decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

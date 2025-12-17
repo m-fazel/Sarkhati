@@ -82,8 +82,8 @@ pub async fn send_order(config: &DanayanConfig, order: &DanayanOrderData) -> Res
         response_text.clone()
     };
 
-    println!("Order response status: {}", status);
-    println!("Order response body: {}", decoded_text);
+    println!("[Danayan] Order response status: {}", status);
+    println!("[Danayan] Order response body: {}", decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

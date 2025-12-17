@@ -104,8 +104,8 @@ pub async fn send_order(config: &OrdibeheshtConfig, order: &OrdibeheshtOrderData
         response_text.clone()
     };
 
-    println!("Order response status: {}", status);
-    println!("Order response body: {}", decoded_text);
+    println!("[Ordibehesht] Order response status: {}", status);
+    println!("[Ordibehesht] Order response body: {}", decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

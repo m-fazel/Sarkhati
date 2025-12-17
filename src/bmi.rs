@@ -104,8 +104,8 @@ pub async fn send_order(config: &BmiConfig, order: &BmiOrderData) -> Result<()> 
         response_text.clone()
     };
 
-    println!("Order response status: {}", status);
-    println!("Order response body: {}", decoded_text);
+    println!("[BMI] Order response status: {}", status);
+    println!("[BMI] Order response body: {}", decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

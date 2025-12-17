@@ -98,8 +98,8 @@ pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData) -> Resul
         response_text.clone()
     };
 
-    println!("Order response status: {}", status);
-    println!("Order response body: {}", decoded_text);
+    println!("[Alvand] Order response status: {}", status);
+    println!("[Alvand] Order response body: {}", decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

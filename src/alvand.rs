@@ -1,5 +1,5 @@
 use anyhow::Result;
-use chrono::{Timelike, Utc};
+use chrono::{FixedOffset, Timelike, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
 use serde::{Deserialize, Serialize};
 
@@ -34,16 +34,19 @@ fn default_batch_delay() -> u64 {
 /// Algorithm based on the JavaScript implementation:
 /// 1. Extract substring from nt (starting at position 2)
 /// 2. Calculate sum of character codes from URL path
-/// 3. Calculate seconds since midnight UTC (minus 2 seconds for clock skew)
+/// 3. Calculate seconds since midnight Iran time (UTC+3:30) (minus 2 seconds for clock skew)
 /// 4. Generate header: "firstPart.secondPart"
-///    - firstPart = floor(extractedValue * utcSeconds * urlCharSum)
-///    - secondPart = utcSeconds * urlCharSum
+///    - firstPart = floor(extractedValue * iranSeconds * urlCharSum)
+///    - secondPart = iranSeconds * urlCharSum
 pub fn calculate_x_app_n(nt: &str, url: &str) -> String {
-    // Get current UTC time minus 2 seconds (for clock skew)
-    let now = Utc::now() - chrono::Duration::seconds(2);
+    // Iran timezone is UTC+3:30 (3 hours and 30 minutes = 12600 seconds)
+    let iran_tz = FixedOffset::east_opt(3 * 3600 + 30 * 60).unwrap();
 
-    // Calculate seconds since midnight UTC
-    let utc_seconds: i64 = (3600 * now.hour() + 60 * now.minute() + now.second()) as i64;
+    // Get current Iran time minus 2 seconds (for clock skew)
+    let now = Utc::now().with_timezone(&iran_tz) - chrono::Duration::seconds(2);
+
+    // Calculate seconds since midnight Iran time
+    let iran_seconds: i64 = (3600 * now.hour() + 60 * now.minute() + now.second()) as i64;
 
     // Calculate sum of character codes from URL
     let url_char_sum: i64 = url.chars().map(|c| c as i64).sum();
@@ -58,7 +61,7 @@ pub fn calculate_x_app_n(nt: &str, url: &str) -> String {
     // Calculate the position to extract 5 characters from
     let l_len = l.len() as i64;
     let pos = if l_len > 5 {
-        (utc_seconds % (l_len - 5) - offset).abs() as usize
+        (iran_seconds % (l_len - 5) - offset).abs() as usize
     } else {
         0
     };
@@ -71,7 +74,7 @@ pub fn calculate_x_app_n(nt: &str, url: &str) -> String {
     let extracted_value: f64 = extracted_str.parse().unwrap_or(0.0);
 
     // Calculate both parts
-    let second_part = utc_seconds * url_char_sum;
+    let second_part = iran_seconds * url_char_sum;
     let first_part = (extracted_value * second_part as f64).floor() as i64;
 
     format!("{}.{}", first_part, second_part)

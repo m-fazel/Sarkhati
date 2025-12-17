@@ -38,7 +38,7 @@ pub struct BidarOrderData {
     pub price: String,
 }
 
-pub async fn send_order(config: &BidarConfig, order: &BidarOrderData, test_mode: bool) -> Result<()> {
+pub async fn send_order(config: &BidarConfig, order: &BidarOrderData, test_mode: bool, curl_only: bool) -> Result<()> {
     let client = reqwest::Client::new();
 
     let order_json = serde_json::to_string(order)?;
@@ -80,6 +80,11 @@ pub async fn send_order(config: &BidarConfig, order: &BidarOrderData, test_mode:
   --data-raw '{}'"#,
             config.order_url, config.user_agent, auth_value, x_user_trace_header, order_json);
         println!();
+
+        // If curl_only, don't send the request
+        if curl_only {
+            return Ok(());
+        }
     }
 
     let mut headers = HeaderMap::new();

@@ -41,7 +41,7 @@ pub struct DanayanOrderData {
     pub order_side: i32,
 }
 
-pub async fn send_order(config: &DanayanConfig, order: &DanayanOrderData, test_mode: bool) -> Result<()> {
+pub async fn send_order(config: &DanayanConfig, order: &DanayanOrderData, test_mode: bool, curl_only: bool) -> Result<()> {
     let client = reqwest::Client::new();
 
     let order_json = serde_json::to_string(order)?;
@@ -69,6 +69,11 @@ pub async fn send_order(config: &DanayanConfig, order: &DanayanOrderData, test_m
   --data-raw '{}'"#,
             config.order_url, config.user_agent, config.cookie, order_json);
         println!();
+
+        // If curl_only, don't send the request
+        if curl_only {
+            return Ok(());
+        }
     }
 
     let mut headers = HeaderMap::new();

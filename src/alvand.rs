@@ -100,7 +100,7 @@ pub struct AlvandOrderData {
     pub divided_order: bool,
 }
 
-pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData, test_mode: bool) -> Result<()> {
+pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData, test_mode: bool, curl_only: bool) -> Result<()> {
     let client = reqwest::Client::new();
 
     // Calculate X-App-N dynamically for each request
@@ -134,6 +134,11 @@ pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData, test_mod
   --data-raw '{}'"#,
             config.order_url, config.user_agent, x_app_n, config.cookie, order_json);
         println!();
+
+        // If curl_only, don't send the request
+        if curl_only {
+            return Ok(());
+        }
     }
 
     let mut headers = HeaderMap::new();

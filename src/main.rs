@@ -26,6 +26,8 @@ async fn main() -> Result<()> {
 
     // Check for test flag
     let test_mode = args.iter().any(|a| a == "test" || a == "--test");
+    // Check for curl flag (only print curl command, don't send request)
+    let curl_only = args.iter().any(|a| a == "curl" || a == "--curl");
 
     let broker = match args.get(1).map(|s| s.as_str()) {
         Some("mofid") => Broker::Mofid,
@@ -35,66 +37,70 @@ async fn main() -> Result<()> {
         Some("alvand") => Broker::Alvand,
         Some("bidar") => Broker::Bidar,
         Some("all") => Broker::All,
-        Some("test") | Some("--test") => {
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test]", args[0]);
-            eprintln!("The 'test' flag should come after the broker name.");
+        Some("test") | Some("--test") | Some("curl") | Some("--curl") => {
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]", args[0]);
+            eprintln!("The 'test' and 'curl' flags should come after the broker name.");
             std::process::exit(1);
         }
         Some(other) => {
             eprintln!("Unknown broker: {}", other);
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test]", args[0]);
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]", args[0]);
             std::process::exit(1);
         }
         None => {
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test]", args[0]);
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]", args[0]);
             std::process::exit(1);
         }
     };
 
     if test_mode {
-        println!("*** TEST MODE: Loop will run only once ***\n");
+        if curl_only {
+            println!("*** TEST MODE + CURL ONLY: Will print curl commands without sending requests ***\n");
+        } else {
+            println!("*** TEST MODE: Loop will run only once ***\n");
+        }
     }
 
     match broker {
-        Broker::Mofid => run_mofid(test_mode).await,
-        Broker::Bmi => run_bmi(test_mode).await,
-        Broker::Danayan => run_danayan(test_mode).await,
-        Broker::Ordibehesht => run_ordibehesht(test_mode).await,
-        Broker::Alvand => run_alvand(test_mode).await,
-        Broker::Bidar => run_bidar(test_mode).await,
-        Broker::All => run_all(test_mode).await,
+        Broker::Mofid => run_mofid(test_mode, curl_only).await,
+        Broker::Bmi => run_bmi(test_mode, curl_only).await,
+        Broker::Danayan => run_danayan(test_mode, curl_only).await,
+        Broker::Ordibehesht => run_ordibehesht(test_mode, curl_only).await,
+        Broker::Alvand => run_alvand(test_mode, curl_only).await,
+        Broker::Bidar => run_bidar(test_mode, curl_only).await,
+        Broker::All => run_all(test_mode, curl_only).await,
     }
 }
 
-async fn run_all(test_mode: bool) -> Result<()> {
+async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     println!("Starting Sarkhati - All Brokers in Parallel\n");
 
     let mofid_handle = tokio::spawn(async move {
-        if let Err(e) = run_mofid(test_mode).await {
+        if let Err(e) = run_mofid(test_mode, curl_only).await {
             eprintln!("[Mofid] Error: {}", e);
         }
     });
 
     let bmi_handle = tokio::spawn(async move {
-        if let Err(e) = run_bmi(test_mode).await {
+        if let Err(e) = run_bmi(test_mode, curl_only).await {
             eprintln!("[BMI] Error: {}", e);
         }
     });
 
     let danayan_handle = tokio::spawn(async move {
-        if let Err(e) = run_danayan(test_mode).await {
+        if let Err(e) = run_danayan(test_mode, curl_only).await {
             eprintln!("[Danayan] Error: {}", e);
         }
     });
 
     let ordibehesht_handle = tokio::spawn(async move {
-        if let Err(e) = run_ordibehesht(test_mode).await {
+        if let Err(e) = run_ordibehesht(test_mode, curl_only).await {
             eprintln!("[Ordibehesht] Error: {}", e);
         }
     });
 
     let bidar_handle = tokio::spawn(async move {
-        if let Err(e) = run_bidar(test_mode).await {
+        if let Err(e) = run_bidar(test_mode, curl_only).await {
             eprintln!("[Bidar] Error: {}", e);
         }
     });
@@ -104,7 +110,7 @@ async fn run_all(test_mode: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_mofid(test_mode: bool) -> Result<()> {
+async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_mofid.json")
         .context("Failed to read config_mofid.json")?;
     let config: mofid::MofidConfig = serde_json::from_str(&config_str)
@@ -146,9 +152,10 @@ async fn run_mofid(test_mode: bool) -> Result<()> {
             let order_clone = order.clone();
             let batch = batch_number;
             let is_test = test_mode;
+            let is_curl_only = curl_only;
 
             let handle = tokio::spawn(async move {
-                match mofid::send_order(&config_clone, &order_clone, is_test).await {
+                match mofid::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -170,7 +177,7 @@ async fn run_mofid(test_mode: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_bmi(test_mode: bool) -> Result<()> {
+async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_bmi.json")
         .context("Failed to read config_bmi.json")?;
     let config: bmi::BmiConfig = serde_json::from_str(&config_str)
@@ -206,9 +213,10 @@ async fn run_bmi(test_mode: bool) -> Result<()> {
             let order_clone = order.clone();
             let batch = batch_number;
             let is_test = test_mode;
+            let is_curl_only = curl_only;
 
             let handle = tokio::spawn(async move {
-                match bmi::send_order(&config_clone, &order_clone, is_test).await {
+                match bmi::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -230,7 +238,7 @@ async fn run_bmi(test_mode: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_danayan(test_mode: bool) -> Result<()> {
+async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_danayan.json")
         .context("Failed to read config_danayan.json")?;
     let config: danayan::DanayanConfig = serde_json::from_str(&config_str)
@@ -266,9 +274,10 @@ async fn run_danayan(test_mode: bool) -> Result<()> {
             let order_clone = order.clone();
             let batch = batch_number;
             let is_test = test_mode;
+            let is_curl_only = curl_only;
 
             let handle = tokio::spawn(async move {
-                match danayan::send_order(&config_clone, &order_clone, is_test).await {
+                match danayan::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -290,7 +299,7 @@ async fn run_danayan(test_mode: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_ordibehesht(test_mode: bool) -> Result<()> {
+async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_ordibehesht.json")
         .context("Failed to read config_ordibehesht.json")?;
     let config: ordibehesht::OrdibeheshtConfig = serde_json::from_str(&config_str)
@@ -326,9 +335,10 @@ async fn run_ordibehesht(test_mode: bool) -> Result<()> {
             let order_clone = order.clone();
             let batch = batch_number;
             let is_test = test_mode;
+            let is_curl_only = curl_only;
 
             let handle = tokio::spawn(async move {
-                match ordibehesht::send_order(&config_clone, &order_clone, is_test).await {
+                match ordibehesht::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -350,7 +360,7 @@ async fn run_ordibehesht(test_mode: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_alvand(test_mode: bool) -> Result<()> {
+async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_alvand.json")
         .context("Failed to read config_alvand.json")?;
     let config: alvand::AlvandConfig = serde_json::from_str(&config_str)
@@ -386,9 +396,10 @@ async fn run_alvand(test_mode: bool) -> Result<()> {
             let order_clone = order.clone();
             let batch = batch_number;
             let is_test = test_mode;
+            let is_curl_only = curl_only;
 
             let handle = tokio::spawn(async move {
-                match alvand::send_order(&config_clone, &order_clone, is_test).await {
+                match alvand::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -411,7 +422,7 @@ async fn run_alvand(test_mode: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_bidar(test_mode: bool) -> Result<()> {
+async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_bidar.json")
         .context("Failed to read config_bidar.json")?;
     let config: bidar::BidarConfig = serde_json::from_str(&config_str)
@@ -447,9 +458,10 @@ async fn run_bidar(test_mode: bool) -> Result<()> {
             let order_clone = order.clone();
             let batch = batch_number;
             let is_test = test_mode;
+            let is_curl_only = curl_only;
 
             let handle = tokio::spawn(async move {
-                match bidar::send_order(&config_clone, &order_clone, is_test).await {
+                match bidar::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }

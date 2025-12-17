@@ -45,7 +45,7 @@ pub struct MofidOrderData {
     pub order_from: String,
 }
 
-pub async fn send_order(config: &MofidConfig, order: &MofidOrderData, test_mode: bool) -> Result<()> {
+pub async fn send_order(config: &MofidConfig, order: &MofidOrderData, test_mode: bool, curl_only: bool) -> Result<()> {
     let client = reqwest::Client::new();
 
     let use_cookie = !config.cookie.is_empty() && config.cookie != "PASTE_YOUR_COOKIE_HERE";
@@ -81,6 +81,11 @@ pub async fn send_order(config: &MofidConfig, order: &MofidOrderData, test_mode:
   --data-raw '{}'"#,
             config.order_url, config.user_agent, auth_header, order_json);
         println!();
+
+        // If curl_only, don't send the request
+        if curl_only {
+            return Ok(());
+        }
     }
 
     let mut headers = HeaderMap::new();

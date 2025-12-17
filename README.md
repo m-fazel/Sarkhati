@@ -253,9 +253,9 @@ Press `Ctrl+C` to stop.
 ```json
 {
   "cookie": "YOUR_COOKIE_HERE",
+  "nt": "YOUR_NT_TOKEN_HERE",
   "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
   "order_url": "https://arzeshafarin.exirbroker.com/api/v1/order",
-  "x_app_n": "1824632377792.35566496",
   "batch_delay_ms": 100,
   "orders": [
     {
@@ -387,7 +387,9 @@ Ordibehesht uses **Cookie** authentication only.
 
 ### Alvand
 
-Alvand uses **Cookie** authentication (contains JWT-TOKEN).
+Alvand uses **Cookie** authentication (contains JWT-TOKEN) and requires an **`nt` token** for generating the dynamic `X-App-N` header.
+
+#### Getting the Cookie
 
 1. Open Chrome and go to https://arzeshafarin.exirbroker.com/
 2. Log in with your credentials
@@ -396,6 +398,31 @@ Alvand uses **Cookie** authentication (contains JWT-TOKEN).
 5. Find `Cookie:` in Request Headers
 6. Copy the entire cookie string (includes `JWT-TOKEN=...`)
 7. Paste in `config_alvand.json` → `cookie` field
+
+#### Getting the `nt` Token
+
+The `nt` token is required to calculate the `X-App-N` header dynamically. To find it:
+
+1. Log in to https://arzeshafarin.exirbroker.com/
+2. Press `F12` → **Console** tab
+3. Paste and run this code:
+
+```javascript
+// Get the session from localStorage
+const session = JSON.parse(localStorage.getItem("session"));
+
+// Access userInfo
+const userInfo = session.userInfo;
+
+// Display the nt value
+console.log("nt value:", userInfo.nt);
+
+// Display the full userInfo object
+console.log("Full userInfo:", userInfo);
+```
+
+4. Copy the `nt` value from the console output
+5. Paste in `config_alvand.json` → `nt` field
 
 ### Bidar Trader
 

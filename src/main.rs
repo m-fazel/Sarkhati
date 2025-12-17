@@ -140,21 +140,25 @@ async fn run_mofid(test_mode: bool) -> Result<()> {
         batch_number += 1;
         println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
 
+        let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 match mofid::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
+            handles.push(handle);
         }
 
         if test_mode {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            for handle in handles {
+                let _ = handle.await;
+            }
             println!("[Mofid] Test mode: exiting after one batch");
             break;
         }
@@ -195,21 +199,25 @@ async fn run_bmi(test_mode: bool) -> Result<()> {
         batch_number += 1;
         println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
 
+        let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 match bmi::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
+            handles.push(handle);
         }
 
         if test_mode {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            for handle in handles {
+                let _ = handle.await;
+            }
             println!("[BMI] Test mode: exiting after one batch");
             break;
         }
@@ -250,21 +258,25 @@ async fn run_danayan(test_mode: bool) -> Result<()> {
         batch_number += 1;
         println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
 
+        let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 match danayan::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
+            handles.push(handle);
         }
 
         if test_mode {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            for handle in handles {
+                let _ = handle.await;
+            }
             println!("[Danayan] Test mode: exiting after one batch");
             break;
         }
@@ -305,21 +317,25 @@ async fn run_ordibehesht(test_mode: bool) -> Result<()> {
         batch_number += 1;
         println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
 
+        let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 match ordibehesht::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
+            handles.push(handle);
         }
 
         if test_mode {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            for handle in handles {
+                let _ = handle.await;
+            }
             println!("[Ordibehesht] Test mode: exiting after one batch");
             break;
         }
@@ -360,21 +376,26 @@ async fn run_alvand(test_mode: bool) -> Result<()> {
         batch_number += 1;
         println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
 
+        let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 match alvand::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
+            handles.push(handle);
         }
 
         if test_mode {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // Wait for all tasks to complete in test mode
+            for handle in handles {
+                let _ = handle.await;
+            }
             println!("[Alvand] Test mode: exiting after one batch");
             break;
         }
@@ -415,21 +436,25 @@ async fn run_bidar(test_mode: bool) -> Result<()> {
         batch_number += 1;
         println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
 
+        let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
 
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 match bidar::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
+            handles.push(handle);
         }
 
         if test_mode {
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            for handle in handles {
+                let _ = handle.await;
+            }
             println!("[Bidar] Test mode: exiting after one batch");
             break;
         }

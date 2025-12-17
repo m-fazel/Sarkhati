@@ -24,6 +24,9 @@ enum Broker {
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
+    // Check for test flag
+    let test_mode = args.iter().any(|a| a == "test" || a == "--test");
+
     let broker = match args.get(1).map(|s| s.as_str()) {
         Some("mofid") => Broker::Mofid,
         Some("bmi") => Broker::Bmi,
@@ -32,63 +35,72 @@ async fn main() -> Result<()> {
         Some("alvand") => Broker::Alvand,
         Some("bidar") => Broker::Bidar,
         Some("all") => Broker::All,
+        Some("test") | Some("--test") => {
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test]", args[0]);
+            eprintln!("The 'test' flag should come after the broker name.");
+            std::process::exit(1);
+        }
         Some(other) => {
             eprintln!("Unknown broker: {}", other);
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all>", args[0]);
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test]", args[0]);
             std::process::exit(1);
         }
         None => {
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all>", args[0]);
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test]", args[0]);
             std::process::exit(1);
         }
     };
 
+    if test_mode {
+        println!("*** TEST MODE: Loop will run only once ***\n");
+    }
+
     match broker {
-        Broker::Mofid => run_mofid().await,
-        Broker::Bmi => run_bmi().await,
-        Broker::Danayan => run_danayan().await,
-        Broker::Ordibehesht => run_ordibehesht().await,
-        Broker::Alvand => run_alvand().await,
-        Broker::Bidar => run_bidar().await,
-        Broker::All => run_all().await,
+        Broker::Mofid => run_mofid(test_mode).await,
+        Broker::Bmi => run_bmi(test_mode).await,
+        Broker::Danayan => run_danayan(test_mode).await,
+        Broker::Ordibehesht => run_ordibehesht(test_mode).await,
+        Broker::Alvand => run_alvand(test_mode).await,
+        Broker::Bidar => run_bidar(test_mode).await,
+        Broker::All => run_all(test_mode).await,
     }
 }
 
-async fn run_all() -> Result<()> {
+async fn run_all(test_mode: bool) -> Result<()> {
     println!("Starting Sarkhati - All Brokers in Parallel\n");
 
-    let mofid_handle = tokio::spawn(async {
-        if let Err(e) = run_mofid().await {
+    let mofid_handle = tokio::spawn(async move {
+        if let Err(e) = run_mofid(test_mode).await {
             eprintln!("[Mofid] Error: {}", e);
         }
     });
 
-    let bmi_handle = tokio::spawn(async {
-        if let Err(e) = run_bmi().await {
+    let bmi_handle = tokio::spawn(async move {
+        if let Err(e) = run_bmi(test_mode).await {
             eprintln!("[BMI] Error: {}", e);
         }
     });
 
-    let danayan_handle = tokio::spawn(async {
-        if let Err(e) = run_danayan().await {
+    let danayan_handle = tokio::spawn(async move {
+        if let Err(e) = run_danayan(test_mode).await {
             eprintln!("[Danayan] Error: {}", e);
         }
     });
 
-    let ordibehesht_handle = tokio::spawn(async {
-        if let Err(e) = run_ordibehesht().await {
+    let ordibehesht_handle = tokio::spawn(async move {
+        if let Err(e) = run_ordibehesht(test_mode).await {
             eprintln!("[Ordibehesht] Error: {}", e);
         }
     });
 
-    let alvand_handle = tokio::spawn(async {
-        if let Err(e) = run_alvand().await {
+    let alvand_handle = tokio::spawn(async move {
+        if let Err(e) = run_alvand(test_mode).await {
             eprintln!("[Alvand] Error: {}", e);
         }
     });
 
-    let bidar_handle = tokio::spawn(async {
-        if let Err(e) = run_bidar().await {
+    let bidar_handle = tokio::spawn(async move {
+        if let Err(e) = run_bidar(test_mode).await {
             eprintln!("[Bidar] Error: {}", e);
         }
     });
@@ -98,7 +110,7 @@ async fn run_all() -> Result<()> {
     Ok(())
 }
 
-async fn run_mofid() -> Result<()> {
+async fn run_mofid(test_mode: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_mofid.json")
         .context("Failed to read config_mofid.json")?;
     let config: mofid::MofidConfig = serde_json::from_str(&config_str)
@@ -147,11 +159,19 @@ async fn run_mofid() -> Result<()> {
             });
         }
 
+        if test_mode {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            println!("[Mofid] Test mode: exiting after one batch");
+            break;
+        }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
     }
+
+    Ok(())
 }
 
-async fn run_bmi() -> Result<()> {
+async fn run_bmi(test_mode: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_bmi.json")
         .context("Failed to read config_bmi.json")?;
     let config: bmi::BmiConfig = serde_json::from_str(&config_str)
@@ -194,11 +214,19 @@ async fn run_bmi() -> Result<()> {
             });
         }
 
+        if test_mode {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            println!("[BMI] Test mode: exiting after one batch");
+            break;
+        }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
     }
+
+    Ok(())
 }
 
-async fn run_danayan() -> Result<()> {
+async fn run_danayan(test_mode: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_danayan.json")
         .context("Failed to read config_danayan.json")?;
     let config: danayan::DanayanConfig = serde_json::from_str(&config_str)
@@ -241,11 +269,19 @@ async fn run_danayan() -> Result<()> {
             });
         }
 
+        if test_mode {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            println!("[Danayan] Test mode: exiting after one batch");
+            break;
+        }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
     }
+
+    Ok(())
 }
 
-async fn run_ordibehesht() -> Result<()> {
+async fn run_ordibehesht(test_mode: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_ordibehesht.json")
         .context("Failed to read config_ordibehesht.json")?;
     let config: ordibehesht::OrdibeheshtConfig = serde_json::from_str(&config_str)
@@ -288,11 +324,19 @@ async fn run_ordibehesht() -> Result<()> {
             });
         }
 
+        if test_mode {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            println!("[Ordibehesht] Test mode: exiting after one batch");
+            break;
+        }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
     }
+
+    Ok(())
 }
 
-async fn run_alvand() -> Result<()> {
+async fn run_alvand(test_mode: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_alvand.json")
         .context("Failed to read config_alvand.json")?;
     let config: alvand::AlvandConfig = serde_json::from_str(&config_str)
@@ -335,11 +379,19 @@ async fn run_alvand() -> Result<()> {
             });
         }
 
+        if test_mode {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            println!("[Alvand] Test mode: exiting after one batch");
+            break;
+        }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
     }
+
+    Ok(())
 }
 
-async fn run_bidar() -> Result<()> {
+async fn run_bidar(test_mode: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_bidar.json")
         .context("Failed to read config_bidar.json")?;
     let config: bidar::BidarConfig = serde_json::from_str(&config_str)
@@ -382,8 +434,16 @@ async fn run_bidar() -> Result<()> {
             });
         }
 
+        if test_mode {
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            println!("[Bidar] Test mode: exiting after one batch");
+            break;
+        }
+
         tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
     }
+
+    Ok(())
 }
 
 /// Decode Unicode escape sequences (e.g., \u0645) to actual characters

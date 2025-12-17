@@ -99,7 +99,7 @@ async fn run_all(test_mode: bool) -> Result<()> {
         }
     });
 
-    let _ = tokio::join!(mofid_handle, bmi_handle, danayan_handle, ordibehesht_handle, alvand_handle, bidar_handle);
+    let _ = tokio::join!(mofid_handle, bmi_handle, danayan_handle, ordibehesht_handle, bidar_handle);
 
     Ok(())
 }

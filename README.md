@@ -441,6 +441,29 @@ cargo run --release -- bidar
 cargo run --release -- all
 ```
 
+### Test Mode
+
+Add `test` argument to run the loop only once (useful for testing configuration):
+
+```bash
+# Test single broker (runs once and exits)
+cargo run --release -- mofid test
+
+# Test all brokers (each runs once and exits)
+cargo run --release -- all test
+```
+
+Test mode output:
+```
+*** TEST MODE: Loop will run only once ***
+
+Starting Sarkhati - Mofid Online Order Sender
+...
+=== Batch #1: Sending 1 orders ===
+✓ Batch #1, Order #1: Sent successfully
+[Mofid] Test mode: exiting after one batch
+```
+
 ### Expected Output
 
 ```

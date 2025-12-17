@@ -75,6 +75,12 @@ async fn main() -> Result<()> {
 async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     println!("Starting Sarkhati - All Brokers in Parallel\n");
 
+    let alvand_handle = tokio::spawn(async move {
+        if let Err(e) = run_alvand(test_mode, curl_only).await {
+            eprintln!("[Alvand] Error: {}", e);
+        }
+    });
+
     let mofid_handle = tokio::spawn(async move {
         if let Err(e) = run_mofid(test_mode, curl_only).await {
             eprintln!("[Mofid] Error: {}", e);
@@ -105,7 +111,7 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
         }
     });
 
-    let _ = tokio::join!(mofid_handle, bmi_handle, danayan_handle, ordibehesht_handle, bidar_handle);
+    let _ = tokio::join!(alvand_handle, mofid_handle, bmi_handle, danayan_handle, ordibehesht_handle, bidar_handle);
 
     Ok(())
 }

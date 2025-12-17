@@ -93,12 +93,6 @@ async fn run_all(test_mode: bool) -> Result<()> {
         }
     });
 
-    let alvand_handle = tokio::spawn(async move {
-        if let Err(e) = run_alvand(test_mode).await {
-            eprintln!("[Alvand] Error: {}", e);
-        }
-    });
-
     let bidar_handle = tokio::spawn(async move {
         if let Err(e) = run_bidar(test_mode).await {
             eprintln!("[Bidar] Error: {}", e);

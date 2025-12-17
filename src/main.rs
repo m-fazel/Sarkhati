@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 
 mod alvand;
+mod bidar;
 mod bmi;
 mod danayan;
 mod mofid;
@@ -15,6 +16,7 @@ enum Broker {
     Danayan,
     Ordibehesht,
     Alvand,
+    Bidar,
     All,
 }
 
@@ -28,14 +30,15 @@ async fn main() -> Result<()> {
         Some("danayan") => Broker::Danayan,
         Some("ordibehesht") => Broker::Ordibehesht,
         Some("alvand") => Broker::Alvand,
+        Some("bidar") => Broker::Bidar,
         Some("all") => Broker::All,
         Some(other) => {
             eprintln!("Unknown broker: {}", other);
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|all>", args[0]);
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all>", args[0]);
             std::process::exit(1);
         }
         None => {
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|all>", args[0]);
+            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all>", args[0]);
             std::process::exit(1);
         }
     };
@@ -46,6 +49,7 @@ async fn main() -> Result<()> {
         Broker::Danayan => run_danayan().await,
         Broker::Ordibehesht => run_ordibehesht().await,
         Broker::Alvand => run_alvand().await,
+        Broker::Bidar => run_bidar().await,
         Broker::All => run_all().await,
     }
 }
@@ -83,7 +87,13 @@ async fn run_all() -> Result<()> {
         }
     });
 
-    let _ = tokio::join!(mofid_handle, bmi_handle, danayan_handle, ordibehesht_handle, alvand_handle);
+    let bidar_handle = tokio::spawn(async {
+        if let Err(e) = run_bidar().await {
+            eprintln!("[Bidar] Error: {}", e);
+        }
+    });
+
+    let _ = tokio::join!(mofid_handle, bmi_handle, danayan_handle, ordibehesht_handle, alvand_handle, bidar_handle);
 
     Ok(())
 }
@@ -319,6 +329,53 @@ async fn run_alvand() -> Result<()> {
 
             tokio::spawn(async move {
                 match alvand::send_order(&config_clone, &order_clone).await {
+                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                }
+            });
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
+    }
+}
+
+async fn run_bidar() -> Result<()> {
+    let config_str = fs::read_to_string("config_bidar.json")
+        .context("Failed to read config_bidar.json")?;
+    let config: bidar::BidarConfig = serde_json::from_str(&config_str)
+        .context("Failed to parse config_bidar.json")?;
+
+    println!("Starting Sarkhati - Bidar Trader Order Sender");
+
+    if config.authorization.is_empty() {
+        anyhow::bail!("Authorization token is required for Bidar. Please set 'authorization' in config_bidar.json");
+    }
+
+    println!("Using Bearer token authentication");
+    println!("Token preview: {}...", &config.authorization[..config.authorization.len().min(50)]);
+
+    if config.orders.is_empty() {
+        anyhow::bail!("No orders configured in config_bidar.json.");
+    }
+
+    println!("Loaded {} order(s) from config", config.orders.len());
+    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
+    println!("Starting continuous order sending...\n");
+
+    let mut batch_number = 0u64;
+    let batch_delay = config.batch_delay_ms;
+
+    loop {
+        batch_number += 1;
+        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+
+        for (index, order) in config.orders.iter().enumerate() {
+            let config_clone = config.clone();
+            let order_clone = order.clone();
+            let batch = batch_number;
+
+            tokio::spawn(async move {
+                match bidar::send_order(&config_clone, &order_clone).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }

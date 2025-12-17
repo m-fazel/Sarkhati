@@ -9,6 +9,7 @@ A Rust application that automatically sends trading orders to Iranian stock brok
 - **Danayan** (danayan) - https://trader.danayan.broker
 - **Ordibehesht** (ordibehesht) - https://online.oibourse.ir
 - **Alvand** (alvand) - https://arzeshafarin.exirbroker.com
+- **Bidar Trader** (bidar) - https://bidartrader.ir
 
 ## Features
 
@@ -46,6 +47,9 @@ cp config_ordibehesht.example.json config_ordibehesht.json
 
 # For Alvand
 cp config_alvand.example.json config_alvand.json
+
+# For Bidar Trader
+cp config_bidar.example.json config_bidar.json
 ```
 
 ### 2. Get your authentication credentials
@@ -71,6 +75,9 @@ cargo run --release -- ordibehesht
 
 # For Alvand
 cargo run --release -- alvand
+
+# For Bidar Trader
+cargo run --release -- bidar
 
 # For ALL brokers in parallel
 cargo run --release -- all
@@ -282,6 +289,37 @@ Press `Ctrl+C` to stop.
 | `coreType` | Usually `"c"` |
 | `bankAccountId` | Usually `-1` |
 
+### Bidar Trader (`config_bidar.json`)
+
+```json
+{
+  "authorization": "YOUR_BEARER_TOKEN_HERE",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
+  "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
+  "batch_delay_ms": 100,
+  "orders": [
+    {
+      "type": "LIMIT",
+      "quantity": "1",
+      "isin": "IRO1NMAD0001",
+      "validity": "DAY",
+      "price": "2548"
+    }
+  ]
+}
+```
+
+#### Bidar Trader Order Parameters
+
+| Field | Description |
+|-------|-------------|
+| `type` | `"LIMIT"` for limit order |
+| `price` | Order price (as string) |
+| `quantity` | Number of shares (as string) |
+| `isin` | Stock ISIN code |
+| `validity` | `"DAY"` for day order |
+
 ---
 
 ## Authentication Guide
@@ -359,6 +397,20 @@ Alvand uses **Cookie** authentication (contains JWT-TOKEN).
 6. Copy the entire cookie string (includes `JWT-TOKEN=...`)
 7. Paste in `config_alvand.json` → `cookie` field
 
+### Bidar Trader
+
+Bidar Trader uses **Bearer token** authentication.
+
+1. Open Chrome and go to https://bidartrader.ir/
+2. Log in with your credentials
+3. Press `F12` → **Network** tab
+4. Look for requests to `api.bidartrader.ir`
+5. Find `Authorization:` in Request Headers
+6. Copy everything after `Bearer ` (just the token)
+7. Paste in `config_bidar.json` → `authorization` field
+
+**Note:** You may also need to copy the `x-user-trace` header value.
+
 ---
 
 ## Usage
@@ -381,6 +433,9 @@ cargo run --release -- ordibehesht
 
 # Run for Alvand
 cargo run --release -- alvand
+
+# Run for Bidar Trader
+cargo run --release -- bidar
 
 # Run ALL brokers in parallel
 cargo run --release -- all

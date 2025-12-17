@@ -38,8 +38,49 @@ pub struct BidarOrderData {
     pub price: String,
 }
 
-pub async fn send_order(config: &BidarConfig, order: &BidarOrderData) -> Result<()> {
+pub async fn send_order(config: &BidarConfig, order: &BidarOrderData, test_mode: bool) -> Result<()> {
     let client = reqwest::Client::new();
+
+    let order_json = serde_json::to_string(order)?;
+
+    // Authorization header
+    let auth_value = if config.authorization.starts_with("Bearer ") {
+        config.authorization.clone()
+    } else {
+        format!("Bearer {}", config.authorization)
+    };
+
+    // Print curl command in test mode
+    if test_mode {
+        let x_user_trace_header = if !config.x_user_trace.is_empty() {
+            format!("-H 'x-user-trace: {}' \\\n  ", config.x_user_trace)
+        } else {
+            String::new()
+        };
+        println!("[Bidar] Equivalent curl command:");
+        println!(r#"curl '{}' \
+  --compressed \
+  -X POST \
+  -H 'User-Agent: {}' \
+  -H 'Accept: application/json' \
+  -H 'Accept-Language: en-US,en;q=0.5' \
+  -H 'Accept-Encoding: gzip, deflate, br, zstd' \
+  -H 'Content-Type: application/json' \
+  -H 'Referer: https://bidartrader.ir/' \
+  -H 'Origin: https://bidartrader.ir' \
+  -H 'Authorization: {}' \
+  {}-H 'Sec-Fetch-Dest: empty' \
+  -H 'Sec-Fetch-Mode: cors' \
+  -H 'Sec-Fetch-Site: same-site' \
+  -H 'Connection: keep-alive' \
+  -H 'Priority: u=0' \
+  -H 'Pragma: no-cache' \
+  -H 'Cache-Control: no-cache' \
+  -H 'TE: trailers' \
+  --data-raw '{}'"#,
+            config.order_url, config.user_agent, auth_value, x_user_trace_header, order_json);
+        println!();
+    }
 
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
@@ -57,12 +98,6 @@ pub async fn send_order(config: &BidarConfig, order: &BidarOrderData) -> Result<
     headers.insert("Cache-Control", HeaderValue::from_static("no-cache"));
     headers.insert("TE", HeaderValue::from_static("trailers"));
 
-    // Authorization header
-    let auth_value = if config.authorization.starts_with("Bearer ") {
-        config.authorization.clone()
-    } else {
-        format!("Bearer {}", config.authorization)
-    };
     headers.insert(AUTHORIZATION, HeaderValue::from_str(&auth_value)?);
 
     // x-user-trace header (optional)
@@ -70,13 +105,12 @@ pub async fn send_order(config: &BidarConfig, order: &BidarOrderData) -> Result<
         headers.insert("x-user-trace", HeaderValue::from_str(&config.x_user_trace)?);
     }
 
-    let order_json = serde_json::to_string(order)?;
     let body_bytes = order_json.as_bytes();
 
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(CONTENT_LENGTH, HeaderValue::from_str(&body_bytes.len().to_string())?);
 
-    println!("Sending order JSON: {}", order_json);
+    println!("[Bidar] Sending order JSON: {}", order_json);
 
     let response = client.post(&config.order_url)
         .headers(headers)

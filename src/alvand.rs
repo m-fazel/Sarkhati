@@ -100,12 +100,41 @@ pub struct AlvandOrderData {
     pub divided_order: bool,
 }
 
-pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData) -> Result<()> {
+pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData, test_mode: bool) -> Result<()> {
     let client = reqwest::Client::new();
 
     // Calculate X-App-N dynamically for each request
     let x_app_n = calculate_x_app_n(&config.nt, &config.order_url);
     println!("[Alvand] Generated X-App-N: {}", x_app_n);
+
+    let order_json = serde_json::to_string(order)?;
+
+    // Print curl command in test mode
+    if test_mode {
+        println!("[Alvand] Equivalent curl command:");
+        println!(r#"curl '{}' \
+  --compressed \
+  -X POST \
+  -H 'User-Agent: {}' \
+  -H 'Accept: application/json, text/plain, */*' \
+  -H 'Accept-Language: en-US,en;q=0.5' \
+  -H 'Accept-Encoding: gzip, deflate, br, zstd' \
+  -H 'Referer: https://arzeshafarin.exirbroker.com/exir/mainNew' \
+  -H 'Content-Type: application/json' \
+  -H 'X-App-N: {}' \
+  -H 'Origin: https://arzeshafarin.exirbroker.com' \
+  -H 'Connection: keep-alive' \
+  -H 'Cookie: {}' \
+  -H 'Sec-Fetch-Dest: empty' \
+  -H 'Sec-Fetch-Mode: cors' \
+  -H 'Sec-Fetch-Site: same-origin' \
+  -H 'Priority: u=0' \
+  -H 'Pragma: no-cache' \
+  -H 'Cache-Control: no-cache' \
+  --data-raw '{}'"#,
+            config.order_url, config.user_agent, x_app_n, config.cookie, order_json);
+        println!();
+    }
 
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
@@ -124,7 +153,6 @@ pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData) -> Resul
     headers.insert("Pragma", HeaderValue::from_static("no-cache"));
     headers.insert("Cache-Control", HeaderValue::from_static("no-cache"));
 
-    let order_json = serde_json::to_string(order)?;
     let body_bytes = order_json.as_bytes();
 
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));

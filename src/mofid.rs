@@ -45,8 +45,43 @@ pub struct MofidOrderData {
     pub order_from: String,
 }
 
-pub async fn send_order(config: &MofidConfig, order: &MofidOrderData) -> Result<()> {
+pub async fn send_order(config: &MofidConfig, order: &MofidOrderData, test_mode: bool) -> Result<()> {
     let client = reqwest::Client::new();
+
+    let use_cookie = !config.cookie.is_empty() && config.cookie != "PASTE_YOUR_COOKIE_HERE";
+    let order_json = serde_json::to_string(order)?;
+
+    // Print curl command in test mode
+    if test_mode {
+        let auth_header = if use_cookie {
+            format!("-H 'Cookie: {}'", config.cookie)
+        } else {
+            format!("-H 'Authorization: Bearer {}'", config.authorization)
+        };
+        println!("[Mofid] Equivalent curl command:");
+        println!(r#"curl '{}' \
+  --compressed \
+  -X POST \
+  -H 'User-Agent: {}' \
+  -H 'Accept: application/json, text/plain, */*' \
+  -H 'Accept-Language: en-US,en;q=0.5' \
+  -H 'Accept-Encoding: gzip, deflate, br, zstd' \
+  -H 'Referer: https://tg.mofidonline.com/' \
+  -H 'Content-Type: application/json' \
+  -H 'x-appname: titan' \
+  {} \
+  -H 'Origin: https://tg.mofidonline.com' \
+  -H 'Connection: keep-alive' \
+  -H 'Sec-Fetch-Dest: empty' \
+  -H 'Sec-Fetch-Mode: cors' \
+  -H 'Sec-Fetch-Site: same-site' \
+  -H 'Priority: u=0' \
+  -H 'Pragma: no-cache' \
+  -H 'Cache-Control: no-cache' \
+  --data-raw '{}'"#,
+            config.order_url, config.user_agent, auth_header, order_json);
+        println!();
+    }
 
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
@@ -54,8 +89,6 @@ pub async fn send_order(config: &MofidConfig, order: &MofidOrderData) -> Result<
     headers.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.5"));
     headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br, zstd"));
     headers.insert(REFERER, HeaderValue::from_static("https://tg.mofidonline.com/"));
-
-    let use_cookie = !config.cookie.is_empty() && config.cookie != "PASTE_YOUR_COOKIE_HERE";
 
     if use_cookie {
         headers.insert(COOKIE, HeaderValue::from_str(&config.cookie)?);
@@ -74,13 +107,12 @@ pub async fn send_order(config: &MofidConfig, order: &MofidOrderData) -> Result<
     headers.insert("Pragma", HeaderValue::from_static("no-cache"));
     headers.insert("Cache-Control", HeaderValue::from_static("no-cache"));
 
-    let order_json = serde_json::to_string(order)?;
     let body_bytes = order_json.as_bytes();
 
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(CONTENT_LENGTH, HeaderValue::from_str(&body_bytes.len().to_string())?);
 
-    println!("Sending order JSON: {}", order_json);
+    println!("[Mofid] Sending order JSON: {}", order_json);
 
     let response = client.post(&config.order_url)
         .headers(headers)

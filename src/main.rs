@@ -145,9 +145,10 @@ async fn run_mofid(test_mode: bool) -> Result<()> {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
+            let is_test = test_mode;
 
             let handle = tokio::spawn(async move {
-                match mofid::send_order(&config_clone, &order_clone).await {
+                match mofid::send_order(&config_clone, &order_clone, is_test).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -204,9 +205,10 @@ async fn run_bmi(test_mode: bool) -> Result<()> {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
+            let is_test = test_mode;
 
             let handle = tokio::spawn(async move {
-                match bmi::send_order(&config_clone, &order_clone).await {
+                match bmi::send_order(&config_clone, &order_clone, is_test).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -263,9 +265,10 @@ async fn run_danayan(test_mode: bool) -> Result<()> {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
+            let is_test = test_mode;
 
             let handle = tokio::spawn(async move {
-                match danayan::send_order(&config_clone, &order_clone).await {
+                match danayan::send_order(&config_clone, &order_clone, is_test).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -322,9 +325,10 @@ async fn run_ordibehesht(test_mode: bool) -> Result<()> {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
+            let is_test = test_mode;
 
             let handle = tokio::spawn(async move {
-                match ordibehesht::send_order(&config_clone, &order_clone).await {
+                match ordibehesht::send_order(&config_clone, &order_clone, is_test).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -381,9 +385,10 @@ async fn run_alvand(test_mode: bool) -> Result<()> {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
+            let is_test = test_mode;
 
             let handle = tokio::spawn(async move {
-                match alvand::send_order(&config_clone, &order_clone).await {
+                match alvand::send_order(&config_clone, &order_clone, is_test).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
@@ -441,9 +446,10 @@ async fn run_bidar(test_mode: bool) -> Result<()> {
             let config_clone = config.clone();
             let order_clone = order.clone();
             let batch = batch_number;
+            let is_test = test_mode;
 
             let handle = tokio::spawn(async move {
-                match bidar::send_order(&config_clone, &order_clone).await {
+                match bidar::send_order(&config_clone, &order_clone, is_test).await {
                     Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }

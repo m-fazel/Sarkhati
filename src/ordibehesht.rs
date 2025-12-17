@@ -61,8 +61,37 @@ pub struct OrdibeheshtOrderData {
     pub short_sell_incentive_percent: i32,
 }
 
-pub async fn send_order(config: &OrdibeheshtConfig, order: &OrdibeheshtOrderData) -> Result<()> {
+pub async fn send_order(config: &OrdibeheshtConfig, order: &OrdibeheshtOrderData, test_mode: bool) -> Result<()> {
     let client = reqwest::Client::new();
+
+    let order_json = serde_json::to_string(order)?;
+
+    // Print curl command in test mode
+    if test_mode {
+        println!("[Ordibehesht] Equivalent curl command:");
+        println!(r#"curl '{}' \
+  --compressed \
+  -X POST \
+  -H 'User-Agent: {}' \
+  -H 'Accept: */*' \
+  -H 'Accept-Language: en-US,en;q=0.5' \
+  -H 'Accept-Encoding: gzip, deflate, br, zstd' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Requested-With: XMLHttpRequest' \
+  -H 'Origin: https://online.oibourse.ir' \
+  -H 'Connection: keep-alive' \
+  -H 'Referer: https://online.oibourse.ir/' \
+  -H 'Cookie: {}' \
+  -H 'Sec-Fetch-Dest: empty' \
+  -H 'Sec-Fetch-Mode: cors' \
+  -H 'Sec-Fetch-Site: same-site' \
+  -H 'Priority: u=0' \
+  -H 'Pragma: no-cache' \
+  -H 'Cache-Control: no-cache' \
+  --data-raw '{}'"#,
+            config.order_url, config.user_agent, config.cookie, order_json);
+        println!();
+    }
 
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
@@ -81,13 +110,12 @@ pub async fn send_order(config: &OrdibeheshtConfig, order: &OrdibeheshtOrderData
     headers.insert("Pragma", HeaderValue::from_static("no-cache"));
     headers.insert("Cache-Control", HeaderValue::from_static("no-cache"));
 
-    let order_json = serde_json::to_string(order)?;
     let body_bytes = order_json.as_bytes();
 
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(CONTENT_LENGTH, HeaderValue::from_str(&body_bytes.len().to_string())?);
 
-    println!("Sending order JSON: {}", order_json);
+    println!("[Ordibehesht] Sending order JSON: {}", order_json);
 
     let response = client.post(&config.order_url)
         .headers(headers)

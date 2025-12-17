@@ -21,3 +21,7 @@ login_response.html
 # OS
 .DS_Store
 Thumbs.db
+
+# Configs
+config_*.json
+!config_*.example.json

@@ -56,7 +56,13 @@ pub async fn send_order(config: &MofidConfig, order: &MofidOrderData, test_mode:
         let auth_header = if use_cookie {
             format!("-H 'Cookie: {}'", config.cookie)
         } else {
-            format!("-H 'Authorization: Bearer {}'", config.authorization)
+            let token = config
+                .authorization
+                .strip_prefix("Bearer ")
+                .unwrap_or(&config.authorization);
+
+            let auth_value = format!("Bearer {}", token);
+            format!("-H 'Authorization: Bearer {}'", auth_value)
         };
         println!("[Mofid] Equivalent curl command:");
         println!(r#"curl '{}' \
@@ -98,7 +104,12 @@ pub async fn send_order(config: &MofidConfig, order: &MofidOrderData, test_mode:
     if use_cookie {
         headers.insert(COOKIE, HeaderValue::from_str(&config.cookie)?);
     } else if !config.authorization.is_empty() {
-        let auth_value = format!("Bearer {}", config.authorization);
+        let token = config
+        .authorization
+        .strip_prefix("Bearer ")
+        .unwrap_or(&config.authorization);
+
+        let auth_value = format!("Bearer {}", token);
         headers.insert(AUTHORIZATION, HeaderValue::from_str(&auth_value)?);
     }
 

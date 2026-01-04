@@ -8,10 +8,10 @@
   "delay_model": "rtt",
   "calibration": {
     "enabled": true,
-    "probe_count": 15,
+    "probe_count": 10,
     "probe_interval_ms": 300,
-    "warmup_probes": 3,
-    "safety_margin_ms": 3,
+    "warmup_probes": 2,
+    "safety_margin_ms": 0,
     "estimator": "p50",
     "max_acceptable_rtt_ms": 500
   },

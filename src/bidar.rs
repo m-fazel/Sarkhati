@@ -130,13 +130,6 @@ pub struct BidarCalibrationConfig {
 
 #[derive(Debug)]
 pub struct CalibrationSummary {
-    pub samples_ms: Vec<u64>,
-    pub min_ms: u64,
-    pub p50_ms: u64,
-    pub p75_ms: u64,
-    pub p90_ms: u64,
-    pub max_ms: u64,
-    pub jitter_ms: u64,
     pub estimated_delay_ms: u64,
     pub last_probe_wall_time: SystemTime,
 }
@@ -404,13 +397,6 @@ pub async fn run_calibration(
     );
 
     Ok(CalibrationSummary {
-        samples_ms,
-        min_ms,
-        p50_ms,
-        p75_ms,
-        p90_ms,
-        max_ms,
-        jitter_ms,
         estimated_delay_ms,
         last_probe_wall_time: last_probe_wall,
     })

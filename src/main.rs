@@ -545,134 +545,178 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
-        let now = chrono::Local::now();
-        let today = now.date_naive();
-        let target_datetime = chrono::Local
-            .from_local_datetime(&today.and_time(target_time))
-            .single()
-            .context("Failed to resolve target_time in local timezone")?;
-
-        if target_datetime <= now {
-            anyhow::bail!("target_time has already passed for today");
-        }
-
-        let client = reqwest::Client::new();
-        let mut last_wall_time = std::time::SystemTime::now();
-
         let calibration_enabled = config
             .calibration
             .as_ref()
             .map_or(false, |calibration| calibration.enabled);
+        let client = reqwest::Client::new();
 
-        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
-            let summary = bidar::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
-            let mut estimated_delay_ms = summary.estimated_delay_ms;
-            match config.delay_model {
-                bidar::BidarDelayModel::Rtt => {}
-                bidar::BidarDelayModel::HalfRtt => {
-                    estimated_delay_ms = (estimated_delay_ms + 1) / 2;
-                    println!(
-                        "[Bidar] Delay model half_rtt applied, estimate now {}ms",
-                        estimated_delay_ms
-                    );
-                }
+        loop {
+            let target_datetime = next_target_datetime(target_time)?;
+            let target_epoch_ms = target_datetime.timestamp_millis();
+
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms < target_epoch_ms {
+                println!(
+                    "[Bidar] Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                );
             }
-            (
-                estimated_delay_ms,
-                config
+
+            let mut last_wall_epoch_ms = now_epoch_ms;
+
+            if calibration_enabled {
+                let calibration = config
                     .calibration
                     .as_ref()
-                    .map(|calibration| calibration.safety_margin_ms)
-                    .unwrap_or_default(),
-                summary.last_probe_wall_time,
-            )
-        } else {
-            println!("[Bidar] Calibration disabled; using zero delay estimate.");
-            (0, 0, std::time::SystemTime::now())
-        };
+                    .context("Calibration config missing")?;
+                let expected_duration_ms =
+                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
+                let mut max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
+                if matches!(config.delay_model, bidar::BidarDelayModel::HalfRtt) {
+                    max_delay_ms = (max_delay_ms + 1) / 2;
+                }
+                let estimated_effective_delay_ms =
+                    max_delay_ms + calibration.safety_margin_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - config.rate_limit_ms as i64;
+                let calibration_start_epoch_ms =
+                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                if now_epoch_ms < calibration_start_epoch_ms {
+                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                    println!(
+                        "[Bidar] Waiting {}ms before calibration window (epoch_ms={})",
+                        sleep_ms, calibration_start_epoch_ms
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+                }
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > latest_probe_finish_epoch_ms {
+                    anyhow::bail!(
+                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                    );
+                }
+                last_wall_epoch_ms = now_epoch_ms;
+            }
 
-        let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-        let final_send_time =
-            target_datetime - chrono::Duration::milliseconds(effective_delay_ms as i64);
-        let final_send_system: std::time::SystemTime = final_send_time.into();
+            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
+                if calibration_enabled {
+                    let summary =
+                        bidar::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
+                    let mut estimated_delay_ms = summary.estimated_delay_ms;
+                    match config.delay_model {
+                        bidar::BidarDelayModel::Rtt => {}
+                        bidar::BidarDelayModel::HalfRtt => {
+                            estimated_delay_ms = (estimated_delay_ms + 1) / 2;
+                            println!(
+                                "[Bidar] Delay model half_rtt applied, estimate now {}ms",
+                                estimated_delay_ms
+                            );
+                        }
+                    }
+                    (
+                        estimated_delay_ms,
+                        config
+                            .calibration
+                            .as_ref()
+                            .map(|calibration| calibration.safety_margin_ms)
+                            .unwrap_or_default(),
+                        summary.last_probe_wall_time,
+                    )
+                } else {
+                    println!("[Bidar] Calibration disabled; using zero delay estimate.");
+                    (0, 0, std::time::SystemTime::now())
+                };
 
-        if final_send_time <= chrono::Local::now() {
-            anyhow::bail!(
-                "final_send_time has already passed; increase target_time or reduce delay"
+            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+            let final_send_time = chrono::DateTime::<chrono::Local>::from(
+                std::time::UNIX_EPOCH
+                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
             );
-        }
 
-        if calibration_enabled {
-            if let Ok(delta) = final_send_system.duration_since(last_probe_wall_time) {
-                if delta < std::time::Duration::from_millis(config.rate_limit_ms) {
+            let now_epoch_ms = current_epoch_millis()?;
+            if final_send_epoch_ms <= now_epoch_ms {
+                anyhow::bail!(
+                    "final_send_time has already passed; increase target_time or reduce delay"
+                );
+            }
+
+            if calibration_enabled {
+                let last_probe_epoch_ms = last_probe_wall_time
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_millis() as i64;
+                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+                if gap_ms < config.rate_limit_ms as i64 {
                     anyhow::bail!(
                         "Last probe is too close to final_send_time; ensure at least {}ms gap",
                         config.rate_limit_ms
                     );
                 }
             }
-        }
 
-        println!(
-            "[Bidar] target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-            target_datetime.format("%H:%M:%S%.3f"),
-            final_send_time.format("%H:%M:%S%.3f"),
-            estimated_delay_ms,
-            safety_margin_ms,
-            effective_delay_ms
-        );
+            println!(
+                "[Bidar] target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            );
+            println!(
+                "[Bidar] target_epoch_ms={} final_send_epoch_ms={}",
+                target_epoch_ms, final_send_epoch_ms
+            );
 
-        let now_wall = std::time::SystemTime::now();
-        if now_wall < last_wall_time {
-            anyhow::bail!("System clock moved backwards; aborting");
-        }
-        last_wall_time = now_wall;
-
-        let until_final = final_send_system
-            .duration_since(now_wall)
-            .context("final_send_time already passed")?;
-
-        let spin_threshold = std::time::Duration::from_millis(5);
-        if until_final > spin_threshold {
-            tokio::time::sleep(until_final - spin_threshold).await;
-        }
-
-        loop {
-            let current = std::time::SystemTime::now();
-            if current < last_wall_time {
-                anyhow::bail!("System clock moved backwards; aborting");
+            let until_final_ms = final_send_epoch_ms - now_epoch_ms;
+            let spin_threshold_ms = 5i64;
+            if until_final_ms > spin_threshold_ms {
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    (until_final_ms - spin_threshold_ms) as u64,
+                ))
+                .await;
             }
-            if current >= final_send_system {
-                break;
+
+            loop {
+                let current_epoch_ms = current_epoch_millis()?;
+                if current_epoch_ms < last_wall_epoch_ms {
+                    anyhow::bail!("System clock moved backwards; aborting");
+                }
+                if current_epoch_ms >= final_send_epoch_ms {
+                    break;
+                }
+                last_wall_epoch_ms = current_epoch_ms;
+                std::hint::spin_loop();
             }
-            last_wall_time = current;
-            std::hint::spin_loop();
+
+            let actual_send_time = chrono::Local::now();
+            let actual_epoch_us = current_epoch_micros()?;
+            let drift_micros = actual_epoch_us - final_send_epoch_ms as i128 * 1_000;
+            println!(
+                "[Bidar] Sending final order at {} (drift {}µs, epoch_us={})",
+                actual_send_time.format("%H:%M:%S%.3f"),
+                drift_micros,
+                actual_epoch_us
+            );
+
+            for (index, order) in config.orders.iter().enumerate() {
+                bidar::send_order(
+                    &config,
+                    order,
+                    test_mode,
+                    curl_only,
+                    Some(rate_limiter.as_ref()),
+                )
+                .await
+                .with_context(|| format!("Failed to send scheduled order #{}", index + 1))?;
+            }
+
+            if test_mode {
+                println!("[Bidar] Test mode: exiting after scheduled send");
+                return Ok(());
+            }
         }
-
-        let actual_send_time = chrono::Local::now();
-        let drift_micros = actual_send_time
-            .signed_duration_since(final_send_time)
-            .num_microseconds()
-            .unwrap_or_default();
-        println!(
-            "[Bidar] Sending final order at {} (drift {}µs)",
-            actual_send_time.format("%H:%M:%S%.3f"),
-            drift_micros
-        );
-
-        for (index, order) in config.orders.iter().enumerate() {
-            bidar::send_order(
-                &config,
-                order,
-                test_mode,
-                curl_only,
-                Some(rate_limiter.as_ref()),
-            )
-            .await
-            .with_context(|| format!("Failed to send scheduled order #{}", index + 1))?;
-        }
-
-        return Ok(());
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
@@ -732,6 +776,34 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn next_target_datetime(target_time: chrono::NaiveTime) -> Result<chrono::DateTime<chrono::Local>> {
+    let now = chrono::Local::now();
+    let today = now.date_naive();
+    let candidate = chrono::Local
+        .from_local_datetime(&today.and_time(target_time))
+        .single()
+        .context("Failed to resolve target_time in local timezone")?;
+    if candidate > now {
+        Ok(candidate)
+    } else {
+        Ok(candidate + chrono::Duration::days(1))
+    }
+}
+
+fn current_epoch_millis() -> Result<i64> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("System time is before UNIX_EPOCH")?;
+    Ok(now.as_millis() as i64)
+}
+
+fn current_epoch_micros() -> Result<i128> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("System time is before UNIX_EPOCH")?;
+    Ok(now.as_micros() as i128)
 }
 
 /// Decode Unicode escape sequences (e.g., \u0645) to actual characters

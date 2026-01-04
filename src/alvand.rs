@@ -1,7 +1,14 @@
-use anyhow::Result;
+use crate::calibration::{self, CalibrationConfig};
+use crate::rate_limiter::RateLimiter;
+use anyhow::{Context, Result};
 use chrono::{Timelike, Utc};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ORIGIN, REFERER, USER_AGENT};
+use reqwest::header::{
+    HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ORIGIN,
+    REFERER, USER_AGENT,
+};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AlvandConfig {
@@ -17,8 +24,8 @@ pub struct AlvandConfig {
     pub batch_delay_ms: u64,
     #[serde(default)]
     pub target_time: Option<String>,
-    #[serde(default = "default_rate_limit_ms")]
-    pub rate_limit_ms: u64,
+    #[serde(default)]
+    pub calibration: Option<CalibrationConfig>,
 }
 
 fn default_user_agent() -> String {
@@ -31,10 +38,6 @@ fn default_order_url() -> String {
 
 fn default_batch_delay() -> u64 {
     100
-}
-
-fn default_rate_limit_ms() -> u64 {
-    300
 }
 
 /// Calculate the X-App-N header value dynamically
@@ -124,7 +127,13 @@ pub struct AlvandOrderData {
     pub divided_order: bool,
 }
 
-pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData, test_mode: bool, curl_only: bool) -> Result<()> {
+pub async fn send_order(
+    config: &AlvandConfig,
+    order: &AlvandOrderData,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: Option<&RateLimiter>,
+) -> Result<()> {
     let client = reqwest::Client::new();
 
     // Calculate X-App-N dynamically for each request
@@ -182,6 +191,10 @@ pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData, test_mod
     headers.insert("Pragma", HeaderValue::from_static("no-cache"));
     headers.insert("Cache-Control", HeaderValue::from_static("no-cache"));
 
+    if let Some(limiter) = rate_limiter {
+        limiter.wait().await;
+    }
+
     let body_bytes = order_json.as_bytes();
 
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -212,4 +225,43 @@ pub async fn send_order(config: &AlvandConfig, order: &AlvandOrderData, test_mod
     }
 
     Ok(())
+}
+
+pub async fn run_calibration(
+    config: &AlvandConfig,
+    client: &reqwest::Client,
+    rate_limiter: &RateLimiter,
+) -> Result<calibration::CalibrationSummary> {
+    let calibration = config
+        .calibration
+        .as_ref()
+        .context("Calibration config missing")?;
+
+    calibration::run_calibration("[Alvand]", calibration, rate_limiter, || {
+        send_probe(client, config)
+    })
+    .await
+}
+
+async fn send_probe(
+    client: &reqwest::Client,
+    config: &AlvandConfig,
+) -> Result<(u64, u128, StatusCode)> {
+    let t0 = Instant::now();
+
+    let mut headers = HeaderMap::new();
+    headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
+    headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
+    headers.insert(COOKIE, HeaderValue::from_str(&config.cookie)?);
+    headers.insert("nt", HeaderValue::from_str(&config.nt)?);
+
+    let base_url = calibration::probe_url(&config.order_url)?;
+    let response = client.head(base_url).headers(headers).send().await?;
+    let status = response.status();
+
+    let rtt = t0.elapsed();
+    let rtt_micros = rtt.as_micros();
+    let rtt_ms = rtt.as_millis() as u64;
+
+    Ok((rtt_ms, rtt_micros, status))
 }

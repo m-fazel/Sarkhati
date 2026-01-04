@@ -3,8 +3,16 @@
   "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
   "order_url": "https://api.oibourse.ir/Web/V1/Order/Post",
   "batch_delay_ms": 100,
-  "rate_limit_ms": 300,
   "target_time": "08:45:00.000",
+  "calibration": {
+    "enabled": true,
+    "probe_count": 10,
+    "probe_interval_ms": 300,
+    "warmup_probes": 2,
+    "safety_margin_ms": 0,
+    "estimator": "p50",
+    "max_acceptable_rtt_ms": 500
+  },
   "orders": [
     {
       "IsSymbolCautionAgreement": false,

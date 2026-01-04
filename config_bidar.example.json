@@ -4,7 +4,6 @@
   "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
   "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
   "batch_delay_ms": 100,
-  "rate_limit_ms": 300,
   "target_time": "08:45:00.000",
   "delay_model": "rtt",
   "calibration": {

@@ -15,6 +15,10 @@ pub struct MofidConfig {
     pub orders: Vec<MofidOrderData>,
     #[serde(default = "default_batch_delay")]
     pub batch_delay_ms: u64,
+    #[serde(default)]
+    pub target_time: Option<String>,
+    #[serde(default = "default_rate_limit_ms")]
+    pub rate_limit_ms: u64,
 }
 
 fn default_user_agent() -> String {
@@ -27,6 +31,10 @@ fn default_order_url() -> String {
 
 fn default_batch_delay() -> u64 {
     100
+}
+
+fn default_rate_limit_ms() -> u64 {
+    300
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -154,4 +162,3 @@ pub async fn send_order(config: &MofidConfig, order: &MofidOrderData, test_mode:
 
     Ok(())
 }
-

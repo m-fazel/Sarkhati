@@ -4,6 +4,8 @@
   "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
   "order_url": "https://mofidonline.com/apigateway/api/v1/Order/send",
   "batch_delay_ms": 100,
+  "rate_limit_ms": 300,
+  "target_time": "08:45:00.000",
   "orders": [
     {
       "orderSide": "Buy",
@@ -16,4 +18,3 @@
     }
   ]
 }
-

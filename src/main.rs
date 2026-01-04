@@ -169,6 +169,67 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
         anyhow::bail!("No orders configured in config.json.");
     }
 
+    if let Some(target_time_str) = &config.target_time {
+        println!(
+            "[Mofid] Scheduled mode enabled for target time {}",
+            target_time_str
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+
+        loop {
+            let target_datetime = next_target_datetime(target_time)?;
+            let target_epoch_ms = target_datetime.timestamp_millis();
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms < target_epoch_ms {
+                println!(
+                    "[Mofid] Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                );
+            }
+
+            let mut last_wall_epoch_ms = now_epoch_ms;
+
+            let mut order_index = 0usize;
+            while order_index < config.orders.len() {
+                let scheduled_epoch_ms =
+                    target_epoch_ms + order_index as i64 * config.rate_limit_ms as i64;
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > scheduled_epoch_ms {
+                    println!(
+                        "[Mofid] Warning: scheduled send time passed by {}ms for order #{}",
+                        now_epoch_ms - scheduled_epoch_ms,
+                        order_index + 1
+                    );
+                }
+                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+                let actual_epoch_us = current_epoch_micros()?;
+                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+                println!(
+                    "[Mofid] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                    order_index + 1,
+                    actual_send_time.format("%H:%M:%S%.3f"),
+                    drift_micros,
+                    actual_epoch_us
+                );
+
+                let order = &config.orders[order_index];
+                mofid::send_order(&config, order, test_mode, curl_only)
+                    .await
+                    .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                order_index += 1;
+            }
+
+            if test_mode {
+                println!("[Mofid] Test mode: exiting after scheduled send");
+                return Ok(());
+            }
+        }
+    }
+
     println!("Loaded {} order(s) from config", config.orders.len());
     println!("Batch delay: {}ms between batches", config.batch_delay_ms);
     println!("Starting continuous order sending...\n");
@@ -241,6 +302,67 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
         anyhow::bail!("No orders configured in config.json.");
     }
 
+    if let Some(target_time_str) = &config.target_time {
+        println!(
+            "[BMI] Scheduled mode enabled for target time {}",
+            target_time_str
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+
+        loop {
+            let target_datetime = next_target_datetime(target_time)?;
+            let target_epoch_ms = target_datetime.timestamp_millis();
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms < target_epoch_ms {
+                println!(
+                    "[BMI] Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                );
+            }
+
+            let mut last_wall_epoch_ms = now_epoch_ms;
+
+            let mut order_index = 0usize;
+            while order_index < config.orders.len() {
+                let scheduled_epoch_ms =
+                    target_epoch_ms + order_index as i64 * config.rate_limit_ms as i64;
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > scheduled_epoch_ms {
+                    println!(
+                        "[BMI] Warning: scheduled send time passed by {}ms for order #{}",
+                        now_epoch_ms - scheduled_epoch_ms,
+                        order_index + 1
+                    );
+                }
+                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+                let actual_epoch_us = current_epoch_micros()?;
+                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+                println!(
+                    "[BMI] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                    order_index + 1,
+                    actual_send_time.format("%H:%M:%S%.3f"),
+                    drift_micros,
+                    actual_epoch_us
+                );
+
+                let order = &config.orders[order_index];
+                bmi::send_order(&config, order, test_mode, curl_only)
+                    .await
+                    .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                order_index += 1;
+            }
+
+            if test_mode {
+                println!("[BMI] Test mode: exiting after scheduled send");
+                return Ok(());
+            }
+        }
+    }
+
     println!("Loaded {} order(s) from config", config.orders.len());
     println!("Batch delay: {}ms between batches", config.batch_delay_ms);
     println!("Starting continuous order sending...\n");
@@ -311,6 +433,67 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_danayan.json.");
+    }
+
+    if let Some(target_time_str) = &config.target_time {
+        println!(
+            "[Danayan] Scheduled mode enabled for target time {}",
+            target_time_str
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+
+        loop {
+            let target_datetime = next_target_datetime(target_time)?;
+            let target_epoch_ms = target_datetime.timestamp_millis();
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms < target_epoch_ms {
+                println!(
+                    "[Danayan] Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                );
+            }
+
+            let mut last_wall_epoch_ms = now_epoch_ms;
+
+            let mut order_index = 0usize;
+            while order_index < config.orders.len() {
+                let scheduled_epoch_ms =
+                    target_epoch_ms + order_index as i64 * config.rate_limit_ms as i64;
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > scheduled_epoch_ms {
+                    println!(
+                        "[Danayan] Warning: scheduled send time passed by {}ms for order #{}",
+                        now_epoch_ms - scheduled_epoch_ms,
+                        order_index + 1
+                    );
+                }
+                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+                let actual_epoch_us = current_epoch_micros()?;
+                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+                println!(
+                    "[Danayan] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                    order_index + 1,
+                    actual_send_time.format("%H:%M:%S%.3f"),
+                    drift_micros,
+                    actual_epoch_us
+                );
+
+                let order = &config.orders[order_index];
+                danayan::send_order(&config, order, test_mode, curl_only)
+                    .await
+                    .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                order_index += 1;
+            }
+
+            if test_mode {
+                println!("[Danayan] Test mode: exiting after scheduled send");
+                return Ok(());
+            }
+        }
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
@@ -388,6 +571,67 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
         anyhow::bail!("No orders configured in config_ordibehesht.json.");
     }
 
+    if let Some(target_time_str) = &config.target_time {
+        println!(
+            "[Ordibehesht] Scheduled mode enabled for target time {}",
+            target_time_str
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+
+        loop {
+            let target_datetime = next_target_datetime(target_time)?;
+            let target_epoch_ms = target_datetime.timestamp_millis();
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms < target_epoch_ms {
+                println!(
+                    "[Ordibehesht] Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                );
+            }
+
+            let mut last_wall_epoch_ms = now_epoch_ms;
+
+            let mut order_index = 0usize;
+            while order_index < config.orders.len() {
+                let scheduled_epoch_ms =
+                    target_epoch_ms + order_index as i64 * config.rate_limit_ms as i64;
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > scheduled_epoch_ms {
+                    println!(
+                        "[Ordibehesht] Warning: scheduled send time passed by {}ms for order #{}",
+                        now_epoch_ms - scheduled_epoch_ms,
+                        order_index + 1
+                    );
+                }
+                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+                let actual_epoch_us = current_epoch_micros()?;
+                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+                println!(
+                    "[Ordibehesht] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                    order_index + 1,
+                    actual_send_time.format("%H:%M:%S%.3f"),
+                    drift_micros,
+                    actual_epoch_us
+                );
+
+                let order = &config.orders[order_index];
+                ordibehesht::send_order(&config, order, test_mode, curl_only)
+                    .await
+                    .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                order_index += 1;
+            }
+
+            if test_mode {
+                println!("[Ordibehesht] Test mode: exiting after scheduled send");
+                return Ok(());
+            }
+        }
+    }
+
     println!("Loaded {} order(s) from config", config.orders.len());
     println!("Batch delay: {}ms between batches", config.batch_delay_ms);
     println!("Starting continuous order sending...\n");
@@ -460,6 +704,67 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_alvand.json.");
+    }
+
+    if let Some(target_time_str) = &config.target_time {
+        println!(
+            "[Alvand] Scheduled mode enabled for target time {}",
+            target_time_str
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+
+        loop {
+            let target_datetime = next_target_datetime(target_time)?;
+            let target_epoch_ms = target_datetime.timestamp_millis();
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms < target_epoch_ms {
+                println!(
+                    "[Alvand] Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                );
+            }
+
+            let mut last_wall_epoch_ms = now_epoch_ms;
+
+            let mut order_index = 0usize;
+            while order_index < config.orders.len() {
+                let scheduled_epoch_ms =
+                    target_epoch_ms + order_index as i64 * config.rate_limit_ms as i64;
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > scheduled_epoch_ms {
+                    println!(
+                        "[Alvand] Warning: scheduled send time passed by {}ms for order #{}",
+                        now_epoch_ms - scheduled_epoch_ms,
+                        order_index + 1
+                    );
+                }
+                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+                let actual_epoch_us = current_epoch_micros()?;
+                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+                println!(
+                    "[Alvand] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                    order_index + 1,
+                    actual_send_time.format("%H:%M:%S%.3f"),
+                    drift_micros,
+                    actual_epoch_us
+                );
+
+                let order = &config.orders[order_index];
+                alvand::send_order(&config, order, test_mode, curl_only)
+                    .await
+                    .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                order_index += 1;
+            }
+
+            if test_mode {
+                println!("[Alvand] Test mode: exiting after scheduled send");
+                return Ok(());
+            }
+        }
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
@@ -671,38 +976,32 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
                 target_epoch_ms, final_send_epoch_ms
             );
 
-            let until_final_ms = final_send_epoch_ms - now_epoch_ms;
-            let spin_threshold_ms = 5i64;
-            if until_final_ms > spin_threshold_ms {
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    (until_final_ms - spin_threshold_ms) as u64,
-                ))
-                .await;
-            }
-
-            loop {
-                let current_epoch_ms = current_epoch_millis()?;
-                if current_epoch_ms < last_wall_epoch_ms {
-                    anyhow::bail!("System clock moved backwards; aborting");
+            let mut order_index = 0usize;
+            while order_index < config.orders.len() {
+                let scheduled_epoch_ms =
+                    final_send_epoch_ms + order_index as i64 * config.rate_limit_ms as i64;
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > scheduled_epoch_ms {
+                    println!(
+                        "[Bidar] Warning: scheduled send time passed by {}ms for order #{}",
+                        now_epoch_ms - scheduled_epoch_ms,
+                        order_index + 1
+                    );
                 }
-                if current_epoch_ms >= final_send_epoch_ms {
-                    break;
-                }
-                last_wall_epoch_ms = current_epoch_ms;
-                std::hint::spin_loop();
-            }
+                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
 
-            let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-            let actual_epoch_us = current_epoch_micros()?;
-            let drift_micros = actual_epoch_us - final_send_epoch_ms as i128 * 1_000;
-            println!(
-                "[Bidar] Sending final order at {} (drift {}µs, epoch_us={})",
-                actual_send_time.format("%H:%M:%S%.3f"),
-                drift_micros,
-                actual_epoch_us
-            );
+                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+                let actual_epoch_us = current_epoch_micros()?;
+                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+                println!(
+                    "[Bidar] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                    order_index + 1,
+                    actual_send_time.format("%H:%M:%S%.3f"),
+                    drift_micros,
+                    actual_epoch_us
+                );
 
-            for (index, order) in config.orders.iter().enumerate() {
+                let order = &config.orders[order_index];
                 bidar::send_order(
                     &config,
                     order,
@@ -711,7 +1010,8 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
                     Some(rate_limiter.as_ref()),
                 )
                 .await
-                .with_context(|| format!("Failed to send scheduled order #{}", index + 1))?;
+                .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                order_index += 1;
             }
 
             if test_mode {
@@ -806,6 +1106,38 @@ fn current_epoch_micros() -> Result<i128> {
         .duration_since(std::time::UNIX_EPOCH)
         .context("System time is before UNIX_EPOCH")?;
     Ok(now.as_micros() as i128)
+}
+
+async fn wait_until_epoch_ms(target_epoch_ms: i64, last_wall_epoch_ms: &mut i64) -> Result<()> {
+    let now_epoch_ms = current_epoch_millis()?;
+    if now_epoch_ms < *last_wall_epoch_ms {
+        anyhow::bail!("System clock moved backwards; aborting");
+    }
+    *last_wall_epoch_ms = now_epoch_ms;
+
+    let until_target_ms = target_epoch_ms - now_epoch_ms;
+    let spin_threshold_ms = 5i64;
+    if until_target_ms > spin_threshold_ms {
+        tokio::time::sleep(std::time::Duration::from_millis(
+            (until_target_ms - spin_threshold_ms) as u64,
+        ))
+        .await;
+    }
+
+    loop {
+        let current_epoch_ms = current_epoch_millis()?;
+        if current_epoch_ms < *last_wall_epoch_ms {
+            anyhow::bail!("System clock moved backwards; aborting");
+        }
+        if current_epoch_ms >= target_epoch_ms {
+            *last_wall_epoch_ms = current_epoch_ms;
+            break;
+        }
+        *last_wall_epoch_ms = current_epoch_ms;
+        std::hint::spin_loop();
+    }
+
+    Ok(())
 }
 
 /// Decode Unicode escape sequences (e.g., \u0645) to actual characters

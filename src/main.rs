@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::TimeZone;
+use chrono_tz::Asia::Tehran;
 use std::env;
 use std::fs;
 
@@ -631,10 +632,11 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
             let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Local>::from(
+            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
                 std::time::UNIX_EPOCH
                     + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            );
+            )
+            .with_timezone(&Tehran);
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
@@ -690,7 +692,7 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
                 std::hint::spin_loop();
             }
 
-            let actual_send_time = chrono::Local::now();
+            let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
             let actual_epoch_us = current_epoch_micros()?;
             let drift_micros = actual_epoch_us - final_send_epoch_ms as i128 * 1_000;
             println!(
@@ -778,13 +780,13 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
-fn next_target_datetime(target_time: chrono::NaiveTime) -> Result<chrono::DateTime<chrono::Local>> {
-    let now = chrono::Local::now();
+fn next_target_datetime(target_time: chrono::NaiveTime) -> Result<chrono::DateTime<chrono_tz::Tz>> {
+    let now = chrono::Utc::now().with_timezone(&Tehran);
     let today = now.date_naive();
-    let candidate = chrono::Local
+    let candidate = Tehran
         .from_local_datetime(&today.and_time(target_time))
         .single()
-        .context("Failed to resolve target_time in local timezone")?;
+        .context("Failed to resolve target_time in Asia/Tehran timezone")?;
     if candidate > now {
         Ok(candidate)
     } else {

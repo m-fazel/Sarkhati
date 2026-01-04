@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono::TimeZone;
 use std::env;
 use std::fs;
 
@@ -38,24 +39,35 @@ async fn main() -> Result<()> {
         Some("bidar") => Broker::Bidar,
         Some("all") => Broker::All,
         Some("test") | Some("--test") | Some("curl") | Some("--curl") => {
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]", args[0]);
+            eprintln!(
+                "Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]",
+                args[0]
+            );
             eprintln!("The 'test' and 'curl' flags should come after the broker name.");
             std::process::exit(1);
         }
         Some(other) => {
             eprintln!("Unknown broker: {}", other);
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]", args[0]);
+            eprintln!(
+                "Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]",
+                args[0]
+            );
             std::process::exit(1);
         }
         None => {
-            eprintln!("Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]", args[0]);
+            eprintln!(
+                "Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]",
+                args[0]
+            );
             std::process::exit(1);
         }
     };
 
     if test_mode {
         if curl_only {
-            println!("*** TEST MODE + CURL ONLY: Will print curl commands without sending requests ***\n");
+            println!(
+                "*** TEST MODE + CURL ONLY: Will print curl commands without sending requests ***\n"
+            );
         } else {
             println!("*** TEST MODE: Loop will run only once ***\n");
         }
@@ -111,16 +123,23 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
         }
     });
 
-    let _ = tokio::join!(alvand_handle, mofid_handle, bmi_handle, danayan_handle, ordibehesht_handle, bidar_handle);
+    let _ = tokio::join!(
+        alvand_handle,
+        mofid_handle,
+        bmi_handle,
+        danayan_handle,
+        ordibehesht_handle,
+        bidar_handle
+    );
 
     Ok(())
 }
 
 async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str = fs::read_to_string("config_mofid.json")
-        .context("Failed to read config_mofid.json")?;
-    let config: mofid::MofidConfig = serde_json::from_str(&config_str)
-        .context("Failed to parse config_mofid.json")?;
+    let config_str =
+        fs::read_to_string("config_mofid.json").context("Failed to read config_mofid.json")?;
+    let config: mofid::MofidConfig =
+        serde_json::from_str(&config_str).context("Failed to parse config_mofid.json")?;
 
     println!("Starting Sarkhati - Mofid Online Order Sender");
 
@@ -129,12 +148,20 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
 
     if use_cookie {
         println!("Using Cookie authentication");
-        println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
+        println!(
+            "Cookie preview: {}...",
+            &config.cookie[..config.cookie.len().min(50)]
+        );
     } else if use_auth {
         println!("Using Authorization header");
-        println!("Authorization preview: Bearer {}...", &config.authorization[..config.authorization.len().min(30)]);
+        println!(
+            "Authorization preview: Bearer {}...",
+            &config.authorization[..config.authorization.len().min(30)]
+        );
     } else {
-        anyhow::bail!("No authentication method configured. Please set either 'cookie' or 'authorization' in config.json");
+        anyhow::bail!(
+            "No authentication method configured. Please set either 'cookie' or 'authorization' in config.json"
+        );
     }
 
     if config.orders.is_empty() {
@@ -150,7 +177,11 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
 
     loop {
         batch_number += 1;
-        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+        println!(
+            "=== Batch #{}: Sending {} orders ===",
+            batch_number,
+            config.orders.len()
+        );
 
         let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
@@ -162,7 +193,11 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let handle = tokio::spawn(async move {
                 match mofid::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
-                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Ok(_) => println!(
+                        "✓ Batch #{}, Order #{}: Sent successfully",
+                        batch,
+                        index + 1
+                    ),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
@@ -184,10 +219,10 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
 }
 
 async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str = fs::read_to_string("config_bmi.json")
-        .context("Failed to read config_bmi.json")?;
-    let config: bmi::BmiConfig = serde_json::from_str(&config_str)
-        .context("Failed to parse config_bmi.json")?;
+    let config_str =
+        fs::read_to_string("config_bmi.json").context("Failed to read config_bmi.json")?;
+    let config: bmi::BmiConfig =
+        serde_json::from_str(&config_str).context("Failed to parse config_bmi.json")?;
 
     println!("Starting Sarkhati - BMI Bourse Order Sender");
 
@@ -196,7 +231,10 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     println!("Using Cookie authentication");
-    println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
+    println!(
+        "Cookie preview: {}...",
+        &config.cookie[..config.cookie.len().min(50)]
+    );
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config.json.");
@@ -211,7 +249,11 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
 
     loop {
         batch_number += 1;
-        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+        println!(
+            "=== Batch #{}: Sending {} orders ===",
+            batch_number,
+            config.orders.len()
+        );
 
         let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
@@ -223,7 +265,11 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let handle = tokio::spawn(async move {
                 match bmi::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
-                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Ok(_) => println!(
+                        "✓ Batch #{}, Order #{}: Sent successfully",
+                        batch,
+                        index + 1
+                    ),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
@@ -245,10 +291,10 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
 }
 
 async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str = fs::read_to_string("config_danayan.json")
-        .context("Failed to read config_danayan.json")?;
-    let config: danayan::DanayanConfig = serde_json::from_str(&config_str)
-        .context("Failed to parse config_danayan.json")?;
+    let config_str =
+        fs::read_to_string("config_danayan.json").context("Failed to read config_danayan.json")?;
+    let config: danayan::DanayanConfig =
+        serde_json::from_str(&config_str).context("Failed to parse config_danayan.json")?;
 
     println!("Starting Sarkhati - Danayan Order Sender");
 
@@ -257,7 +303,10 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     println!("Using Cookie authentication");
-    println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
+    println!(
+        "Cookie preview: {}...",
+        &config.cookie[..config.cookie.len().min(50)]
+    );
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_danayan.json.");
@@ -272,7 +321,11 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
 
     loop {
         batch_number += 1;
-        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+        println!(
+            "=== Batch #{}: Sending {} orders ===",
+            batch_number,
+            config.orders.len()
+        );
 
         let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
@@ -283,8 +336,13 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
             let is_curl_only = curl_only;
 
             let handle = tokio::spawn(async move {
-                match danayan::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
-                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                match danayan::send_order(&config_clone, &order_clone, is_test, is_curl_only).await
+                {
+                    Ok(_) => println!(
+                        "✓ Batch #{}, Order #{}: Sent successfully",
+                        batch,
+                        index + 1
+                    ),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
@@ -308,17 +366,22 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
 async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_ordibehesht.json")
         .context("Failed to read config_ordibehesht.json")?;
-    let config: ordibehesht::OrdibeheshtConfig = serde_json::from_str(&config_str)
-        .context("Failed to parse config_ordibehesht.json")?;
+    let config: ordibehesht::OrdibeheshtConfig =
+        serde_json::from_str(&config_str).context("Failed to parse config_ordibehesht.json")?;
 
     println!("Starting Sarkhati - Ordibehesht Order Sender");
 
     if config.cookie.is_empty() {
-        anyhow::bail!("Cookie is required for Ordibehesht. Please set 'cookie' in config_ordibehesht.json");
+        anyhow::bail!(
+            "Cookie is required for Ordibehesht. Please set 'cookie' in config_ordibehesht.json"
+        );
     }
 
     println!("Using Cookie authentication");
-    println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
+    println!(
+        "Cookie preview: {}...",
+        &config.cookie[..config.cookie.len().min(50)]
+    );
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_ordibehesht.json.");
@@ -333,7 +396,11 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
 
     loop {
         batch_number += 1;
-        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+        println!(
+            "=== Batch #{}: Sending {} orders ===",
+            batch_number,
+            config.orders.len()
+        );
 
         let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
@@ -344,8 +411,14 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
             let is_curl_only = curl_only;
 
             let handle = tokio::spawn(async move {
-                match ordibehesht::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
-                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                match ordibehesht::send_order(&config_clone, &order_clone, is_test, is_curl_only)
+                    .await
+                {
+                    Ok(_) => println!(
+                        "✓ Batch #{}, Order #{}: Sent successfully",
+                        batch,
+                        index + 1
+                    ),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
@@ -367,10 +440,10 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
 }
 
 async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str = fs::read_to_string("config_alvand.json")
-        .context("Failed to read config_alvand.json")?;
-    let config: alvand::AlvandConfig = serde_json::from_str(&config_str)
-        .context("Failed to parse config_alvand.json")?;
+    let config_str =
+        fs::read_to_string("config_alvand.json").context("Failed to read config_alvand.json")?;
+    let config: alvand::AlvandConfig =
+        serde_json::from_str(&config_str).context("Failed to parse config_alvand.json")?;
 
     println!("Starting Sarkhati - Alvand Order Sender");
 
@@ -379,7 +452,10 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     println!("Using Cookie authentication");
-    println!("Cookie preview: {}...", &config.cookie[..config.cookie.len().min(50)]);
+    println!(
+        "Cookie preview: {}...",
+        &config.cookie[..config.cookie.len().min(50)]
+    );
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_alvand.json.");
@@ -394,7 +470,11 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
 
     loop {
         batch_number += 1;
-        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+        println!(
+            "=== Batch #{}: Sending {} orders ===",
+            batch_number,
+            config.orders.len()
+        );
 
         let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
@@ -406,7 +486,11 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let handle = tokio::spawn(async move {
                 match alvand::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
-                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                    Ok(_) => println!(
+                        "✓ Batch #{}, Order #{}: Sent successfully",
+                        batch,
+                        index + 1
+                    ),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });
@@ -429,22 +513,166 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
 }
 
 async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str = fs::read_to_string("config_bidar.json")
-        .context("Failed to read config_bidar.json")?;
-    let config: bidar::BidarConfig = serde_json::from_str(&config_str)
-        .context("Failed to parse config_bidar.json")?;
+    let config_str =
+        fs::read_to_string("config_bidar.json").context("Failed to read config_bidar.json")?;
+    let config: bidar::BidarConfig =
+        serde_json::from_str(&config_str).context("Failed to parse config_bidar.json")?;
 
     println!("Starting Sarkhati - Bidar Trader Order Sender");
 
     if config.authorization.is_empty() {
-        anyhow::bail!("Authorization token is required for Bidar. Please set 'authorization' in config_bidar.json");
+        anyhow::bail!(
+            "Authorization token is required for Bidar. Please set 'authorization' in config_bidar.json"
+        );
     }
 
     println!("Using Bearer token authentication");
-    println!("Token preview: {}...", &config.authorization[..config.authorization.len().min(50)]);
+    println!(
+        "Token preview: {}...",
+        &config.authorization[..config.authorization.len().min(50)]
+    );
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_bidar.json.");
+    }
+
+    let rate_limiter = std::sync::Arc::new(bidar::RateLimiter::new(config.rate_limit_ms));
+
+    if let Some(target_time_str) = &config.target_time {
+        println!(
+            "[Bidar] Scheduled mode enabled for target time {}",
+            target_time_str
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+        let now = chrono::Local::now();
+        let today = now.date_naive();
+        let target_datetime = chrono::Local
+            .from_local_datetime(&today.and_time(target_time))
+            .single()
+            .context("Failed to resolve target_time in local timezone")?;
+
+        if target_datetime <= now {
+            anyhow::bail!("target_time has already passed for today");
+        }
+
+        let client = reqwest::Client::new();
+        let mut last_wall_time = std::time::SystemTime::now();
+
+        let calibration_enabled = config
+            .calibration
+            .as_ref()
+            .map_or(false, |calibration| calibration.enabled);
+
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
+            let summary = bidar::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
+            let mut estimated_delay_ms = summary.estimated_delay_ms;
+            match config.delay_model {
+                bidar::BidarDelayModel::Rtt => {}
+                bidar::BidarDelayModel::HalfRtt => {
+                    estimated_delay_ms = (estimated_delay_ms + 1) / 2;
+                    println!(
+                        "[Bidar] Delay model half_rtt applied, estimate now {}ms",
+                        estimated_delay_ms
+                    );
+                }
+            }
+            (
+                estimated_delay_ms,
+                config
+                    .calibration
+                    .as_ref()
+                    .map(|calibration| calibration.safety_margin_ms)
+                    .unwrap_or_default(),
+                summary.last_probe_wall_time,
+            )
+        } else {
+            println!("[Bidar] Calibration disabled; using zero delay estimate.");
+            (0, 0, std::time::SystemTime::now())
+        };
+
+        let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+        let final_send_time =
+            target_datetime - chrono::Duration::milliseconds(effective_delay_ms as i64);
+        let final_send_system: std::time::SystemTime = final_send_time.into();
+
+        if final_send_time <= chrono::Local::now() {
+            anyhow::bail!(
+                "final_send_time has already passed; increase target_time or reduce delay"
+            );
+        }
+
+        if calibration_enabled {
+            if let Ok(delta) = final_send_system.duration_since(last_probe_wall_time) {
+                if delta < std::time::Duration::from_millis(config.rate_limit_ms) {
+                    anyhow::bail!(
+                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
+                        config.rate_limit_ms
+                    );
+                }
+            }
+        }
+
+        println!(
+            "[Bidar] target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+            target_datetime.format("%H:%M:%S%.3f"),
+            final_send_time.format("%H:%M:%S%.3f"),
+            estimated_delay_ms,
+            safety_margin_ms,
+            effective_delay_ms
+        );
+
+        let now_wall = std::time::SystemTime::now();
+        if now_wall < last_wall_time {
+            anyhow::bail!("System clock moved backwards; aborting");
+        }
+        last_wall_time = now_wall;
+
+        let until_final = final_send_system
+            .duration_since(now_wall)
+            .context("final_send_time already passed")?;
+
+        let spin_threshold = std::time::Duration::from_millis(5);
+        if until_final > spin_threshold {
+            tokio::time::sleep(until_final - spin_threshold).await;
+        }
+
+        loop {
+            let current = std::time::SystemTime::now();
+            if current < last_wall_time {
+                anyhow::bail!("System clock moved backwards; aborting");
+            }
+            if current >= final_send_system {
+                break;
+            }
+            last_wall_time = current;
+            std::hint::spin_loop();
+        }
+
+        let actual_send_time = chrono::Local::now();
+        let drift_micros = actual_send_time
+            .signed_duration_since(final_send_time)
+            .num_microseconds()
+            .unwrap_or_default();
+        println!(
+            "[Bidar] Sending final order at {} (drift {}µs)",
+            actual_send_time.format("%H:%M:%S%.3f"),
+            drift_micros
+        );
+
+        for (index, order) in config.orders.iter().enumerate() {
+            bidar::send_order(
+                &config,
+                order,
+                test_mode,
+                curl_only,
+                Some(rate_limiter.as_ref()),
+            )
+            .await
+            .with_context(|| format!("Failed to send scheduled order #{}", index + 1))?;
+        }
+
+        return Ok(());
     }
 
     println!("Loaded {} order(s) from config", config.orders.len());
@@ -456,7 +684,11 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
 
     loop {
         batch_number += 1;
-        println!("=== Batch #{}: Sending {} orders ===", batch_number, config.orders.len());
+        println!(
+            "=== Batch #{}: Sending {} orders ===",
+            batch_number,
+            config.orders.len()
+        );
 
         let mut handles = Vec::new();
         for (index, order) in config.orders.iter().enumerate() {
@@ -465,10 +697,23 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
             let batch = batch_number;
             let is_test = test_mode;
             let is_curl_only = curl_only;
+            let limiter = rate_limiter.clone();
 
             let handle = tokio::spawn(async move {
-                match bidar::send_order(&config_clone, &order_clone, is_test, is_curl_only).await {
-                    Ok(_) => println!("✓ Batch #{}, Order #{}: Sent successfully", batch, index + 1),
+                match bidar::send_order(
+                    &config_clone,
+                    &order_clone,
+                    is_test,
+                    is_curl_only,
+                    Some(limiter.as_ref()),
+                )
+                .await
+                {
+                    Ok(_) => println!(
+                        "✓ Batch #{}, Order #{}: Sent successfully",
+                        batch,
+                        index + 1
+                    ),
                     Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
                 }
             });

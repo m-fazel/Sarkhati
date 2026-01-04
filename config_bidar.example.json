@@ -4,6 +4,18 @@
   "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
   "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
   "batch_delay_ms": 100,
+  "rate_limit_ms": 300,
+  "target_time": "08:45:00.000",
+  "delay_model": "rtt",
+  "calibration": {
+    "enabled": true,
+    "probe_count": 15,
+    "probe_interval_ms": 300,
+    "warmup_probes": 3,
+    "safety_margin_ms": 3,
+    "estimator": "p50",
+    "max_acceptable_rtt_ms": 500
+  },
   "orders": [
     {
       "type": "LIMIT",
@@ -14,4 +26,3 @@
     }
   ]
 }
-

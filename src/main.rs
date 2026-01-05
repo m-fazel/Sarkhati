@@ -16,10 +16,16 @@ mod rate_limiter;
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Broker {
     Mofid,
-    Bmi,
+    // Bmi,
+    Saman,
+    Maskan,
+    Day,
     Danayan,
-    Ordibehesht,
-    Alvand,
+    // Ordibehesht,
+    Nibbourse,
+    Charisma,
+    Artan,
+    // Alvand,
     Bidar,
     All,
 }
@@ -35,10 +41,16 @@ async fn main() -> Result<()> {
 
     let broker = match args.get(1).map(|s| s.as_str()) {
         Some("mofid") => Broker::Mofid,
-        Some("bmi") => Broker::Bmi,
+        // Some("bmi") => Broker::Bmi,
+        Some("saman") => Broker::Saman,
+        Some("maskan") => Broker::Maskan,
+        Some("day") => Broker::Day,
         Some("danayan") => Broker::Danayan,
-        Some("ordibehesht") => Broker::Ordibehesht,
-        Some("alvand") => Broker::Alvand,
+        // Some("ordibehesht") => Broker::Ordibehesht,
+        Some("nibbourse") => Broker::Nibbourse,
+        Some("charisma") => Broker::Charisma,
+        Some("artan") => Broker::Artan,
+        // Some("alvand") => Broker::Alvand,
         Some("bidar") => Broker::Bidar,
         Some("all") => Broker::All,
         Some("test") | Some("--test") | Some("curl") | Some("--curl") => {
@@ -52,14 +64,14 @@ async fn main() -> Result<()> {
         Some(other) => {
             eprintln!("Unknown broker: {}", other);
             eprintln!(
-                "Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]",
+                "Usage: {} <mofid|bmi|saman|maskan|day|danayan|ordibehesht|nibbourse|charisma|artan|alvand|bidar|all> [test] [curl]",
                 args[0]
             );
             std::process::exit(1);
         }
         None => {
             eprintln!(
-                "Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]",
+                "Usage: {} <mofid|bmi|saman|maskan|day|danayan|ordibehesht|nibbourse|charisma|artan|alvand|bidar|all> [test] [curl]",
                 args[0]
             );
             std::process::exit(1);
@@ -78,10 +90,16 @@ async fn main() -> Result<()> {
 
     match broker {
         Broker::Mofid => run_mofid(test_mode, curl_only).await,
-        Broker::Bmi => run_bmi(test_mode, curl_only).await,
+        // Broker::Bmi => run_bmi(test_mode, curl_only).await,
+        Broker::Saman => run_saman(test_mode, curl_only).await,
+        Broker::Maskan => run_maskan(test_mode, curl_only).await,
+        Broker::Day => run_day(test_mode, curl_only).await,
         Broker::Danayan => run_danayan(test_mode, curl_only).await,
-        Broker::Ordibehesht => run_ordibehesht(test_mode, curl_only).await,
-        Broker::Alvand => run_alvand(test_mode, curl_only).await,
+        // Broker::Ordibehesht => run_ordibehesht(test_mode, curl_only).await,
+        Broker::Nibbourse => run_nibbourse(test_mode, curl_only).await,
+        Broker::Charisma => run_charisma(test_mode, curl_only).await,
+        Broker::Artan => run_artan(test_mode, curl_only).await,
+        // Broker::Alvand => run_alvand(test_mode, curl_only).await,
         Broker::Bidar => run_bidar(test_mode, curl_only).await,
         Broker::All => run_all(test_mode, curl_only).await,
     }
@@ -90,21 +108,33 @@ async fn main() -> Result<()> {
 async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     println!("Starting Sarkhati - All Brokers in Parallel\n");
 
-    let alvand_handle = tokio::spawn(async move {
-        if let Err(e) = run_alvand(test_mode, curl_only).await {
-            eprintln!("[Alvand] Error: {}", e);
-        }
-    });
-
     let mofid_handle = tokio::spawn(async move {
         if let Err(e) = run_mofid(test_mode, curl_only).await {
             eprintln!("[Mofid] Error: {}", e);
         }
     });
 
-    let bmi_handle = tokio::spawn(async move {
-        if let Err(e) = run_bmi(test_mode, curl_only).await {
-            eprintln!("[BMI] Error: {}", e);
+    // let bmi_handle = tokio::spawn(async move {
+    //     if let Err(e) = run_bmi(test_mode, curl_only).await {
+    //         eprintln!("[BMI] Error: {}", e);
+    //     }
+    // });
+
+    let saman_handle = tokio::spawn(async move {
+        if let Err(e) = run_saman(test_mode, curl_only).await {
+            eprintln!("[Saman] Error: {}", e);
+        }
+    });
+
+    let maskan_handle = tokio::spawn(async move {
+        if let Err(e) = run_maskan(test_mode, curl_only).await {
+            eprintln!("[Maskan] Error: {}", e);
+        }
+    });
+
+    let maskan_handle = tokio::spawn(async move {
+        if let Err(e) = run_maskan(test_mode, curl_only).await {
+            eprintln!("[Maskan] Error: {}", e);
         }
     });
 
@@ -114,9 +144,33 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
         }
     });
 
-    let ordibehesht_handle = tokio::spawn(async move {
-        if let Err(e) = run_ordibehesht(test_mode, curl_only).await {
-            eprintln!("[Ordibehesht] Error: {}", e);
+    // let ordibehesht_handle = tokio::spawn(async move {
+    //     if let Err(e) = run_ordibehesht(test_mode, curl_only).await {
+    //         eprintln!("[Ordibehesht] Error: {}", e);
+    //     }
+    // });
+
+    let nibbourse_handle = tokio::spawn(async move {
+        if let Err(e) = run_nibbourse(test_mode, curl_only).await {
+            eprintln!("[Nibbourse] Error: {}", e);
+        }
+    });
+
+    let charisma_handle = tokio::spawn(async move {
+        if let Err(e) = run_charisma(test_mode, curl_only).await {
+            eprintln!("[Charisma] Error: {}", e);
+        }
+    });
+
+    let artan_handle = tokio::spawn(async move {
+        if let Err(e) = run_artan(test_mode, curl_only).await {
+            eprintln!("[Artan] Error: {}", e);
+        }
+    });
+
+    let alvand_handle = tokio::spawn(async move {
+        if let Err(e) = run_alvand(test_mode, curl_only).await {
+            eprintln!("[Alvand] Error: {}", e);
         }
     });
 
@@ -127,11 +181,17 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     });
 
     let _ = tokio::join!(
-        alvand_handle,
         mofid_handle,
-        bmi_handle,
+        // bmi_handle,
+        saman_handle,
+        day_handle,
+        maskan_handle,
         danayan_handle,
-        ordibehesht_handle,
+        // ordibehesht_handle,
+        nibbourse_handle,
+        charisma_handle,
+        artan_handle,
+        // alvand_handle,
         bidar_handle
     );
 

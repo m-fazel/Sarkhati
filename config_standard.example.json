@@ -4,9 +4,9 @@
       "name": "saman",
       "cookie": "PASTE_YOUR_COOKIE_HERE",
       "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
-      "order_url": "https://api2.bmibourse.ir/Web/V1/Order/Post",
-      "origin": "https://online.bmibourse.ir",
-      "referer": "https://online.bmibourse.ir/",
+      "order_url": "https://api.samanbourse.ir/Web/V1/Order/Post",
+      "origin": "https://online.samanbourse.ir",
+      "referer": "https://online.samanbourse.ir/",
       "batch_delay_ms": 100,
       "target_time": "08:45:00.000",
       "calibration": {
@@ -25,7 +25,7 @@
           "IsSymbolSepahAgreement": false,
           "SepahAgreementSelected": false,
           "orderCount": 100,
-          "orderPrice": 47460,
+          "orderPrice": 50340,
           "FinancialProviderId": 1,
           "minimumQuantity": 0,
           "maxShow": 0,
@@ -40,7 +40,7 @@
       ]
     },
     {
-      "name": "saman",
+      "name": "day",
       "cookie": "PASTE_YOUR_COOKIE_HERE",
       "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
       "order_url": "https://api.daybroker.ir/Web/V1/Order/Post",
@@ -64,7 +64,7 @@
           "IsSymbolSepahAgreement": false,
           "SepahAgreementSelected": false,
           "orderCount": 100,
-          "orderPrice": 47460,
+          "orderPrice": 50340,
           "FinancialProviderId": 1,
           "minimumQuantity": 0,
           "maxShow": 0,
@@ -79,7 +79,7 @@
       ]
     },
     {
-      "name": "saman",
+      "name": "maskan",
       "cookie": "PASTE_YOUR_COOKIE_HERE",
       "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
       "order_url": "https://api.maskanbrokerage.ir/Web/V1/Order/Post",
@@ -103,7 +103,46 @@
           "IsSymbolSepahAgreement": false,
           "SepahAgreementSelected": false,
           "orderCount": 100,
-          "orderPrice": 47460,
+          "orderPrice": 50340,
+          "FinancialProviderId": 1,
+          "minimumQuantity": 0,
+          "maxShow": 0,
+          "orderId": 0,
+          "isin": "IRO1RVND0001",
+          "orderSide": 65,
+          "orderValidity": 74,
+          "orderValiditydate": null,
+          "shortSellIsEnabled": false,
+          "shortSellIncentivePercent": 0
+        }
+      ]
+    },
+    {
+      "name": "ordibehesht",
+      "cookie": "PASTE_YOUR_COOKIE_HERE",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+      "order_url": "https://api.oibourse.ir/Web/V1/Order/Post",
+      "origin": "https://online.oibourse.ir",
+      "referer": "https://online.oibourse.ir/",
+      "batch_delay_ms": 100,
+      "target_time": "08:45:00.000",
+      "calibration": {
+        "enabled": true,
+        "probe_count": 10,
+        "probe_interval_ms": 300,
+        "warmup_probes": 2,
+        "safety_margin_ms": 0,
+        "estimator": "p50",
+        "max_acceptable_rtt_ms": 500
+      },
+      "orders": [
+        {
+          "IsSymbolCautionAgreement": false,
+          "CautionAgreementSelected": false,
+          "IsSymbolSepahAgreement": false,
+          "SepahAgreementSelected": false,
+          "orderCount": 100,
+          "orderPrice": 50340,
           "FinancialProviderId": 1,
           "minimumQuantity": 0,
           "maxShow": 0,

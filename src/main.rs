@@ -4,31 +4,13 @@ use chrono_tz::Asia::Tehran;
 use std::env;
 use std::fs;
 
-mod alvand;
 mod bidar;
-mod bmi;
 mod calibration;
 mod danayan;
+mod exir_broker;
 mod mofid;
-mod ordibehesht;
 mod rate_limiter;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Broker {
-    Mofid,
-    // Bmi,
-    Saman,
-    Maskan,
-    Day,
-    Danayan,
-    // Ordibehesht,
-    Nibbourse,
-    Charisma,
-    Artan,
-    // Alvand,
-    Bidar,
-    All,
-}
+mod standard_broker;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -40,40 +22,22 @@ async fn main() -> Result<()> {
     let curl_only = args.iter().any(|a| a == "curl" || a == "--curl");
 
     let broker = match args.get(1).map(|s| s.as_str()) {
-        Some("mofid") => Broker::Mofid,
-        // Some("bmi") => Broker::Bmi,
-        Some("saman") => Broker::Saman,
-        Some("maskan") => Broker::Maskan,
-        Some("day") => Broker::Day,
-        Some("danayan") => Broker::Danayan,
-        // Some("ordibehesht") => Broker::Ordibehesht,
-        Some("nibbourse") => Broker::Nibbourse,
-        Some("charisma") => Broker::Charisma,
-        Some("artan") => Broker::Artan,
-        // Some("alvand") => Broker::Alvand,
-        Some("bidar") => Broker::Bidar,
-        Some("all") => Broker::All,
         Some("test") | Some("--test") | Some("curl") | Some("--curl") => {
             eprintln!(
-                "Usage: {} <mofid|bmi|danayan|ordibehesht|alvand|bidar|all> [test] [curl]",
+                "Usage: {} <mofid|danayan|bidar|all|BROKER_NAME> [test] [curl]",
                 args[0]
             );
+            eprintln!("BROKER_NAME comes from config_standard.json or config_exir.json.");
             eprintln!("The 'test' and 'curl' flags should come after the broker name.");
             std::process::exit(1);
         }
-        Some(other) => {
-            eprintln!("Unknown broker: {}", other);
-            eprintln!(
-                "Usage: {} <mofid|bmi|saman|maskan|day|danayan|ordibehesht|nibbourse|charisma|artan|alvand|bidar|all> [test] [curl]",
-                args[0]
-            );
-            std::process::exit(1);
-        }
+        Some(other) => other,
         None => {
             eprintln!(
-                "Usage: {} <mofid|bmi|saman|maskan|day|danayan|ordibehesht|nibbourse|charisma|artan|alvand|bidar|all> [test] [curl]",
+                "Usage: {} <mofid|danayan|bidar|all|BROKER_NAME> [test] [curl]",
                 args[0]
             );
+            eprintln!("BROKER_NAME comes from config_standard.json or config_exir.json.");
             std::process::exit(1);
         }
     };
@@ -89,52 +53,26 @@ async fn main() -> Result<()> {
     }
 
     match broker {
-        Broker::Mofid => run_mofid(test_mode, curl_only).await,
-        // Broker::Bmi => run_bmi(test_mode, curl_only).await,
-        Broker::Saman => run_saman(test_mode, curl_only).await,
-        Broker::Maskan => run_maskan(test_mode, curl_only).await,
-        Broker::Day => run_day(test_mode, curl_only).await,
-        Broker::Danayan => run_danayan(test_mode, curl_only).await,
-        // Broker::Ordibehesht => run_ordibehesht(test_mode, curl_only).await,
-        Broker::Nibbourse => run_nibbourse(test_mode, curl_only).await,
-        Broker::Charisma => run_charisma(test_mode, curl_only).await,
-        Broker::Artan => run_artan(test_mode, curl_only).await,
-        // Broker::Alvand => run_alvand(test_mode, curl_only).await,
-        Broker::Bidar => run_bidar(test_mode, curl_only).await,
-        Broker::All => run_all(test_mode, curl_only).await,
+        "mofid" => run_mofid(test_mode, curl_only).await,
+        "danayan" => run_danayan(test_mode, curl_only).await,
+        "bidar" => run_bidar(test_mode, curl_only).await,
+        "all" => run_all(test_mode, curl_only).await,
+        other => match run_standard_broker_by_name(other, test_mode, curl_only).await {
+            Ok(()) => Ok(()),
+            Err(_) => run_exir_broker_by_name(other, test_mode, curl_only).await,
+        },
     }
 }
 
 async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     println!("Starting Sarkhati - All Brokers in Parallel\n");
 
+    let standard_config = standard_broker::load_config("config_standard.json")?;
+    let exir_config = exir_broker::load_config("config_exir.json")?;
+
     let mofid_handle = tokio::spawn(async move {
         if let Err(e) = run_mofid(test_mode, curl_only).await {
             eprintln!("[Mofid] Error: {}", e);
-        }
-    });
-
-    // let bmi_handle = tokio::spawn(async move {
-    //     if let Err(e) = run_bmi(test_mode, curl_only).await {
-    //         eprintln!("[BMI] Error: {}", e);
-    //     }
-    // });
-
-    let saman_handle = tokio::spawn(async move {
-        if let Err(e) = run_saman(test_mode, curl_only).await {
-            eprintln!("[Saman] Error: {}", e);
-        }
-    });
-
-    let maskan_handle = tokio::spawn(async move {
-        if let Err(e) = run_maskan(test_mode, curl_only).await {
-            eprintln!("[Maskan] Error: {}", e);
-        }
-    });
-
-    let maskan_handle = tokio::spawn(async move {
-        if let Err(e) = run_maskan(test_mode, curl_only).await {
-            eprintln!("[Maskan] Error: {}", e);
         }
     });
 
@@ -144,56 +82,597 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
         }
     });
 
-    // let ordibehesht_handle = tokio::spawn(async move {
-    //     if let Err(e) = run_ordibehesht(test_mode, curl_only).await {
-    //         eprintln!("[Ordibehesht] Error: {}", e);
-    //     }
-    // });
-
-    let nibbourse_handle = tokio::spawn(async move {
-        if let Err(e) = run_nibbourse(test_mode, curl_only).await {
-            eprintln!("[Nibbourse] Error: {}", e);
-        }
-    });
-
-    let charisma_handle = tokio::spawn(async move {
-        if let Err(e) = run_charisma(test_mode, curl_only).await {
-            eprintln!("[Charisma] Error: {}", e);
-        }
-    });
-
-    let artan_handle = tokio::spawn(async move {
-        if let Err(e) = run_artan(test_mode, curl_only).await {
-            eprintln!("[Artan] Error: {}", e);
-        }
-    });
-
-    let alvand_handle = tokio::spawn(async move {
-        if let Err(e) = run_alvand(test_mode, curl_only).await {
-            eprintln!("[Alvand] Error: {}", e);
-        }
-    });
-
     let bidar_handle = tokio::spawn(async move {
         if let Err(e) = run_bidar(test_mode, curl_only).await {
             eprintln!("[Bidar] Error: {}", e);
         }
     });
 
-    let _ = tokio::join!(
-        mofid_handle,
-        // bmi_handle,
-        saman_handle,
-        day_handle,
-        maskan_handle,
-        danayan_handle,
-        // ordibehesht_handle,
-        nibbourse_handle,
-        charisma_handle,
-        artan_handle,
-        // alvand_handle,
-        bidar_handle
+    let mut standard_handles = Vec::new();
+    for broker in standard_config.brokers.clone() {
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_standard_broker(broker, test_mode, curl_only).await {
+                eprintln!("[Standard] Error: {}", e);
+            }
+        });
+        standard_handles.push(handle);
+    }
+
+    let mut exir_handles = Vec::new();
+    for broker in exir_config.brokers.clone() {
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_exir_broker(broker, test_mode, curl_only).await {
+                eprintln!("[Exir] Error: {}", e);
+            }
+        });
+        exir_handles.push(handle);
+    }
+
+    let _ = tokio::join!(mofid_handle, danayan_handle, bidar_handle);
+    for handle in standard_handles {
+        let _ = handle.await;
+    }
+    for handle in exir_handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
+}
+
+async fn run_standard_broker_by_name(name: &str, test_mode: bool, curl_only: bool) -> Result<()> {
+    let config = standard_broker::load_config("config_standard.json")?;
+    let broker = standard_broker::find_broker(&config, name)
+        .cloned()
+        .with_context(|| format!("Broker '{}' not found in config_standard.json", name))?;
+    run_standard_broker(broker, test_mode, curl_only).await
+}
+
+async fn run_exir_broker_by_name(name: &str, test_mode: bool, curl_only: bool) -> Result<()> {
+    let config = exir_broker::load_config("config_exir.json")?;
+    let broker = exir_broker::find_broker(&config, name)
+        .cloned()
+        .with_context(|| format!("Broker '{}' not found in config_exir.json", name))?;
+    run_exir_broker(broker, test_mode, curl_only).await
+}
+
+async fn run_standard_broker(
+    broker: standard_broker::StandardBrokerConfig,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+
+    println!("Starting Sarkhati - {} Order Sender", broker.name);
+
+    if broker.cookie.is_empty() {
+        anyhow::bail!(
+            "Cookie is required for {}. Please set 'cookie' in config_standard.json",
+            broker.name
+        );
+    }
+
+    println!("Using Cookie authentication");
+    println!(
+        "Cookie preview: {}...",
+        &broker.cookie[..broker.cookie.len().min(50)]
     );
+
+    if broker.orders.is_empty() {
+        anyhow::bail!(
+            "No orders configured for {} in config_standard.json.",
+            broker.name
+        );
+    }
+
+    if let Some(target_time_str) = &broker.target_time {
+        println!(
+            "[{}] Scheduled mode enabled for target time {}",
+            broker.name, target_time_str
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+        let calibration_enabled = broker
+            .calibration
+            .as_ref()
+            .map_or(false, |calibration| calibration.enabled);
+        let client = reqwest::Client::new();
+
+        loop {
+            let target_datetime = next_target_datetime(target_time)?;
+            let target_epoch_ms = target_datetime.timestamp_millis();
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms < target_epoch_ms {
+                println!(
+                    "[{}] Next target_time={} (epoch_ms={})",
+                    broker.name,
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                );
+            }
+
+            let mut last_wall_epoch_ms = now_epoch_ms;
+
+            if calibration_enabled {
+                let calibration = broker
+                    .calibration
+                    .as_ref()
+                    .context("Calibration config missing")?;
+                let expected_duration_ms =
+                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
+                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
+                let estimated_effective_delay_ms =
+                    max_delay_ms + calibration.safety_margin_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - broker.batch_delay_ms as i64;
+                let calibration_start_epoch_ms =
+                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                if now_epoch_ms < calibration_start_epoch_ms {
+                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                    println!(
+                        "[{}] Waiting {}ms before calibration window (epoch_ms={})",
+                        broker.name, sleep_ms, calibration_start_epoch_ms
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+                }
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > latest_probe_finish_epoch_ms {
+                    anyhow::bail!(
+                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                    );
+                }
+                last_wall_epoch_ms = now_epoch_ms;
+            }
+
+            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
+                if calibration_enabled {
+                    let summary =
+                        standard_broker::run_calibration(&broker, &client, rate_limiter.as_ref())
+                            .await?;
+                    (
+                        summary.estimated_delay_ms,
+                        broker
+                            .calibration
+                            .as_ref()
+                            .map(|calibration| calibration.safety_margin_ms)
+                            .unwrap_or_default(),
+                        summary.last_probe_wall_time,
+                    )
+                } else {
+                    println!(
+                        "[{}] Calibration disabled; using zero delay estimate.",
+                        broker.name
+                    );
+                    (0, 0, std::time::SystemTime::now())
+                };
+
+            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
+                std::time::UNIX_EPOCH
+                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
+            )
+            .with_timezone(&Tehran);
+
+            let now_epoch_ms = current_epoch_millis()?;
+            if final_send_epoch_ms <= now_epoch_ms {
+                anyhow::bail!(
+                    "final_send_time has already passed; increase target_time or reduce delay"
+                );
+            }
+
+            if calibration_enabled {
+                let last_probe_epoch_ms = last_probe_wall_time
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_millis() as i64;
+                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+                if gap_ms < broker.batch_delay_ms as i64 {
+                    anyhow::bail!(
+                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
+                        broker.batch_delay_ms
+                    );
+                }
+            }
+
+            println!(
+                "[{}] target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                broker.name,
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            );
+            println!(
+                "[{}] target_epoch_ms={} final_send_epoch_ms={}",
+                broker.name, target_epoch_ms, final_send_epoch_ms
+            );
+
+            let mut order_index = 0usize;
+            while order_index < broker.orders.len() {
+                let scheduled_epoch_ms =
+                    final_send_epoch_ms + order_index as i64 * broker.batch_delay_ms as i64;
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > scheduled_epoch_ms {
+                    println!(
+                        "[{}] Warning: scheduled send time passed by {}ms for order #{}",
+                        broker.name,
+                        now_epoch_ms - scheduled_epoch_ms,
+                        order_index + 1
+                    );
+                }
+                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+                let actual_epoch_us = current_epoch_micros()?;
+                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+                println!(
+                    "[{}] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                    broker.name,
+                    order_index + 1,
+                    actual_send_time.format("%H:%M:%S%.3f"),
+                    drift_micros,
+                    actual_epoch_us
+                );
+
+                let order = &broker.orders[order_index];
+                let order_json = serde_json::to_string(order)?;
+                standard_broker::send_order(
+                    &broker,
+                    &order_json,
+                    test_mode,
+                    curl_only,
+                    Some(rate_limiter.as_ref()),
+                )
+                .await
+                .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                order_index += 1;
+            }
+
+            if test_mode {
+                println!("[{}] Test mode: exiting after scheduled send", broker.name);
+                return Ok(());
+            }
+        }
+    }
+
+    println!("Loaded {} order(s) from config", broker.orders.len());
+    println!("Batch delay: {}ms between batches", broker.batch_delay_ms);
+    println!("Starting continuous order sending...\n");
+
+    let mut batch_number = 0u64;
+    let batch_delay = broker.batch_delay_ms;
+
+    loop {
+        batch_number += 1;
+        println!(
+            "=== Batch #{}: Sending {} orders ===",
+            batch_number,
+            broker.orders.len()
+        );
+
+        let mut handles = Vec::new();
+        for (index, order) in broker.orders.iter().enumerate() {
+            let broker_clone = broker.clone();
+            let order_clone = order.clone();
+            let batch = batch_number;
+            let is_test = test_mode;
+            let is_curl_only = curl_only;
+
+            let limiter = rate_limiter.clone();
+            let handle = tokio::spawn(async move {
+                let order_json = match serde_json::to_string(&order_clone) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        eprintln!(
+                            "✗ Batch #{}, Order #{}: Failed to serialize - {}",
+                            batch,
+                            index + 1,
+                            e
+                        );
+                        return;
+                    }
+                };
+                match standard_broker::send_order(
+                    &broker_clone,
+                    &order_json,
+                    is_test,
+                    is_curl_only,
+                    Some(limiter.as_ref()),
+                )
+                .await
+                {
+                    Ok(_) => println!(
+                        "✓ Batch #{}, Order #{}: Sent successfully",
+                        batch,
+                        index + 1
+                    ),
+                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                }
+            });
+            handles.push(handle);
+        }
+
+        if test_mode {
+            for handle in handles {
+                let _ = handle.await;
+            }
+            println!("[{}] Test mode: exiting after one batch", broker.name);
+            break;
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
+    }
+
+    Ok(())
+}
+
+async fn run_exir_broker(
+    broker: exir_broker::ExirBrokerConfig,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+
+    println!("Starting Sarkhati - {} Order Sender", broker.name);
+
+    if broker.cookie.is_empty() {
+        anyhow::bail!(
+            "Cookie is required for {}. Please set 'cookie' in config_exir.json",
+            broker.name
+        );
+    }
+
+    println!("Using Cookie authentication");
+    println!(
+        "Cookie preview: {}...",
+        &broker.cookie[..broker.cookie.len().min(50)]
+    );
+
+    if broker.orders.is_empty() {
+        anyhow::bail!(
+            "No orders configured for {} in config_exir.json.",
+            broker.name
+        );
+    }
+
+    if let Some(target_time_str) = &broker.target_time {
+        println!(
+            "[{}] Scheduled mode enabled for target time {}",
+            broker.name, target_time_str
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+        let calibration_enabled = broker
+            .calibration
+            .as_ref()
+            .map_or(false, |calibration| calibration.enabled);
+        let client = reqwest::Client::new();
+
+        loop {
+            let target_datetime = next_target_datetime(target_time)?;
+            let target_epoch_ms = target_datetime.timestamp_millis();
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms < target_epoch_ms {
+                println!(
+                    "[{}] Next target_time={} (epoch_ms={})",
+                    broker.name,
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                );
+            }
+
+            let mut last_wall_epoch_ms = now_epoch_ms;
+
+            if calibration_enabled {
+                let calibration = broker
+                    .calibration
+                    .as_ref()
+                    .context("Calibration config missing")?;
+                let expected_duration_ms =
+                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
+                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
+                let estimated_effective_delay_ms =
+                    max_delay_ms + calibration.safety_margin_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - broker.batch_delay_ms as i64;
+                let calibration_start_epoch_ms =
+                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                if now_epoch_ms < calibration_start_epoch_ms {
+                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                    println!(
+                        "[{}] Waiting {}ms before calibration window (epoch_ms={})",
+                        broker.name, sleep_ms, calibration_start_epoch_ms
+                    );
+                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+                }
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > latest_probe_finish_epoch_ms {
+                    anyhow::bail!(
+                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                    );
+                }
+                last_wall_epoch_ms = now_epoch_ms;
+            }
+
+            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
+                if calibration_enabled {
+                    let summary =
+                        exir_broker::run_calibration(&broker, &client, rate_limiter.as_ref())
+                            .await?;
+                    (
+                        summary.estimated_delay_ms,
+                        broker
+                            .calibration
+                            .as_ref()
+                            .map(|calibration| calibration.safety_margin_ms)
+                            .unwrap_or_default(),
+                        summary.last_probe_wall_time,
+                    )
+                } else {
+                    println!(
+                        "[{}] Calibration disabled; using zero delay estimate.",
+                        broker.name
+                    );
+                    (0, 0, std::time::SystemTime::now())
+                };
+
+            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
+                std::time::UNIX_EPOCH
+                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
+            )
+            .with_timezone(&Tehran);
+
+            let now_epoch_ms = current_epoch_millis()?;
+            if final_send_epoch_ms <= now_epoch_ms {
+                anyhow::bail!(
+                    "final_send_time has already passed; increase target_time or reduce delay"
+                );
+            }
+
+            if calibration_enabled {
+                let last_probe_epoch_ms = last_probe_wall_time
+                    .duration_since(std::time::UNIX_EPOCH)?
+                    .as_millis() as i64;
+                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+                if gap_ms < broker.batch_delay_ms as i64 {
+                    anyhow::bail!(
+                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
+                        broker.batch_delay_ms
+                    );
+                }
+            }
+
+            println!(
+                "[{}] target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                broker.name,
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            );
+            println!(
+                "[{}] target_epoch_ms={} final_send_epoch_ms={}",
+                broker.name, target_epoch_ms, final_send_epoch_ms
+            );
+
+            let mut order_index = 0usize;
+            while order_index < broker.orders.len() {
+                let scheduled_epoch_ms =
+                    final_send_epoch_ms + order_index as i64 * broker.batch_delay_ms as i64;
+                let now_epoch_ms = current_epoch_millis()?;
+                if now_epoch_ms > scheduled_epoch_ms {
+                    println!(
+                        "[{}] Warning: scheduled send time passed by {}ms for order #{}",
+                        broker.name,
+                        now_epoch_ms - scheduled_epoch_ms,
+                        order_index + 1
+                    );
+                }
+                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+                let actual_epoch_us = current_epoch_micros()?;
+                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+                println!(
+                    "[{}] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                    broker.name,
+                    order_index + 1,
+                    actual_send_time.format("%H:%M:%S%.3f"),
+                    drift_micros,
+                    actual_epoch_us
+                );
+
+                let order = &broker.orders[order_index];
+                let order_json = serde_json::to_string(order)?;
+                exir_broker::send_order(
+                    &broker,
+                    &order_json,
+                    test_mode,
+                    curl_only,
+                    Some(rate_limiter.as_ref()),
+                )
+                .await
+                .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                order_index += 1;
+            }
+
+            if test_mode {
+                println!("[{}] Test mode: exiting after scheduled send", broker.name);
+                return Ok(());
+            }
+        }
+    }
+
+    println!("Loaded {} order(s) from config", broker.orders.len());
+    println!("Batch delay: {}ms between batches", broker.batch_delay_ms);
+    println!("Starting continuous order sending...\n");
+
+    let mut batch_number = 0u64;
+    let batch_delay = broker.batch_delay_ms;
+
+    loop {
+        batch_number += 1;
+        println!(
+            "=== Batch #{}: Sending {} orders ===",
+            batch_number,
+            broker.orders.len()
+        );
+
+        let mut handles = Vec::new();
+        for (index, order) in broker.orders.iter().enumerate() {
+            let broker_clone = broker.clone();
+            let order_clone = order.clone();
+            let batch = batch_number;
+            let is_test = test_mode;
+            let is_curl_only = curl_only;
+
+            let limiter = rate_limiter.clone();
+            let handle = tokio::spawn(async move {
+                let order_json = match serde_json::to_string(&order_clone) {
+                    Ok(json) => json,
+                    Err(e) => {
+                        eprintln!(
+                            "✗ Batch #{}, Order #{}: Failed to serialize - {}",
+                            batch,
+                            index + 1,
+                            e
+                        );
+                        return;
+                    }
+                };
+                match exir_broker::send_order(
+                    &broker_clone,
+                    &order_json,
+                    is_test,
+                    is_curl_only,
+                    Some(limiter.as_ref()),
+                )
+                .await
+                {
+                    Ok(_) => println!(
+                        "✓ Batch #{}, Order #{}: Sent successfully",
+                        batch,
+                        index + 1
+                    ),
+                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                }
+            });
+            handles.push(handle);
+        }
+
+        if test_mode {
+            for handle in handles {
+                let _ = handle.await;
+            }
+            println!("[{}] Test mode: exiting after one batch", broker.name);
+            break;
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
+    }
 
     Ok(())
 }
@@ -269,9 +748,8 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
                 let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
                 let estimated_effective_delay_ms =
                     max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms = target_epoch_ms
-                    - estimated_effective_delay_ms
-                    - config.batch_delay_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
                 let calibration_start_epoch_ms =
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {
@@ -376,9 +854,15 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
                 );
 
                 let order = &config.orders[order_index];
-                mofid::send_order(&config, order, test_mode, curl_only, Some(rate_limiter.as_ref()))
-                    .await
-                    .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                mofid::send_order(
+                    &config,
+                    order,
+                    test_mode,
+                    curl_only,
+                    Some(rate_limiter.as_ref()),
+                )
+                .await
+                .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
                 order_index += 1;
             }
 
@@ -448,6 +932,7 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any())]
 async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str =
         fs::read_to_string("config_bmi.json").context("Failed to read config_bmi.json")?;
@@ -508,9 +993,8 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                 let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
                 let estimated_effective_delay_ms =
                     max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms = target_epoch_ms
-                    - estimated_effective_delay_ms
-                    - config.batch_delay_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
                 let calibration_start_epoch_ms =
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {
@@ -615,9 +1099,15 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                 );
 
                 let order = &config.orders[order_index];
-                bmi::send_order(&config, order, test_mode, curl_only, Some(rate_limiter.as_ref()))
-                    .await
-                    .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
+                bmi::send_order(
+                    &config,
+                    order,
+                    test_mode,
+                    curl_only,
+                    Some(rate_limiter.as_ref()),
+                )
+                .await
+                .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
                 order_index += 1;
             }
 
@@ -747,9 +1237,8 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
                 let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
                 let estimated_effective_delay_ms =
                     max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms = target_epoch_ms
-                    - estimated_effective_delay_ms
-                    - config.batch_delay_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
                 let calibration_start_epoch_ms =
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {
@@ -771,12 +1260,8 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary = danayan::run_calibration(
-                        &config,
-                        &client,
-                        rate_limiter.as_ref(),
-                    )
-                    .await?;
+                    let summary =
+                        danayan::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
                     (
                         summary.estimated_delay_ms,
                         config
@@ -936,6 +1421,7 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any())]
 async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str = fs::read_to_string("config_ordibehesht.json")
         .context("Failed to read config_ordibehesht.json")?;
@@ -998,9 +1484,8 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                 let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
                 let estimated_effective_delay_ms =
                     max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms = target_epoch_ms
-                    - estimated_effective_delay_ms
-                    - config.batch_delay_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
                 let calibration_start_epoch_ms =
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {
@@ -1022,12 +1507,9 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary = ordibehesht::run_calibration(
-                        &config,
-                        &client,
-                        rate_limiter.as_ref(),
-                    )
-                    .await?;
+                    let summary =
+                        ordibehesht::run_calibration(&config, &client, rate_limiter.as_ref())
+                            .await?;
                     (
                         summary.estimated_delay_ms,
                         config
@@ -1187,6 +1669,7 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
+#[cfg(any())]
 async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
     let config_str =
         fs::read_to_string("config_alvand.json").context("Failed to read config_alvand.json")?;
@@ -1247,9 +1730,8 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                 let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
                 let estimated_effective_delay_ms =
                     max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms = target_epoch_ms
-                    - estimated_effective_delay_ms
-                    - config.batch_delay_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
                 let calibration_start_epoch_ms =
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {
@@ -1500,9 +1982,8 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
                 }
                 let estimated_effective_delay_ms =
                     max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms = target_epoch_ms
-                    - estimated_effective_delay_ms
-                    - config.batch_delay_ms as i64;
+                let latest_probe_finish_epoch_ms =
+                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
                 let calibration_start_epoch_ms =
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {

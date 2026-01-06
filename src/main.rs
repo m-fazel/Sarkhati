@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
                 "*** TEST MODE + CURL ONLY: Will print curl commands without sending requests ***\n"
             );
         } else {
-            println!("*** TEST MODE: Loop will run only once ***\n");
+            println!("*** TEST MODE: Will send one order immediately without timers ***\n");
         }
     }
 
@@ -162,6 +162,28 @@ async fn run_standard_broker(
             "No orders configured for {} in config_standard.json.",
             broker.name
         );
+    }
+
+    if test_mode {
+        println!(
+            "[{}] Test mode: sending one order immediately without scheduling.",
+            broker.name
+        );
+        let order = broker
+            .orders
+            .first()
+            .context("No orders available for test mode")?;
+        let order_json = serde_json::to_string(order)?;
+        standard_broker::send_order(
+            &broker,
+            &order_json,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        .with_context(|| format!("Failed to send test order for {}", broker.name))?;
+        return Ok(());
     }
 
     if let Some(target_time_str) = &broker.target_time {
@@ -433,6 +455,28 @@ async fn run_exir_broker(
             "No orders configured for {} in config_exir.json.",
             broker.name
         );
+    }
+
+    if test_mode {
+        println!(
+            "[{}] Test mode: sending one order immediately without scheduling.",
+            broker.name
+        );
+        let order = broker
+            .orders
+            .first()
+            .context("No orders available for test mode")?;
+        let order_json = serde_json::to_string(order)?;
+        exir_broker::send_order(
+            &broker,
+            &order_json,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        .with_context(|| format!("Failed to send test order for {}", broker.name))?;
+        return Ok(());
     }
 
     if let Some(target_time_str) = &broker.target_time {
@@ -709,6 +753,24 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config.json.");
+    }
+
+    if test_mode {
+        println!("[Mofid] Test mode: sending one order immediately without scheduling.");
+        let order = config
+            .orders
+            .first()
+            .context("No orders available for test mode")?;
+        mofid::send_order(
+            &config,
+            order,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        .context("Failed to send test order for Mofid")?;
+        return Ok(());
     }
 
     if let Some(target_time_str) = &config.target_time {
@@ -1198,6 +1260,24 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_danayan.json.");
+    }
+
+    if test_mode {
+        println!("[Danayan] Test mode: sending one order immediately without scheduling.");
+        let order = config
+            .orders
+            .first()
+            .context("No orders available for test mode")?;
+        danayan::send_order(
+            &config,
+            order,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        .context("Failed to send test order for Danayan")?;
+        return Ok(());
     }
 
     if let Some(target_time_str) = &config.target_time {
@@ -1940,6 +2020,24 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+
+    if test_mode {
+        println!("[Bidar] Test mode: sending one order immediately without scheduling.");
+        let order = config
+            .orders
+            .first()
+            .context("No orders available for test mode")?;
+        bidar::send_order(
+            &config,
+            order,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        .context("Failed to send test order for Bidar")?;
+        return Ok(());
+    }
 
     if let Some(target_time_str) = &config.target_time {
         println!(

@@ -18,6 +18,10 @@ fn default_batch_delay() -> u64 {
     100
 }
 
+fn default_batch_repeat() -> usize {
+    1
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ExirBrokersConfig {
     pub brokers: Vec<ExirBrokerConfig>,
@@ -36,6 +40,8 @@ pub struct ExirBrokerConfig {
     pub orders: Vec<ExirOrderData>,
     #[serde(default = "default_batch_delay")]
     pub batch_delay_ms: u64,
+    #[serde(default = "default_batch_repeat")]
+    pub batch_repeat: usize,
     #[serde(default)]
     pub target_time: Option<String>,
     #[serde(default)]

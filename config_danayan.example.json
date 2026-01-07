@@ -3,6 +3,7 @@
   "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
   "order_url": "https://otapi.danayan.broker/api/v1/TseOms/RegisterOrder",
   "batch_delay_ms": 100,
+  "batch_repeat": 1,
   "target_time": "08:45:00.000",
   "calibration": {
     "enabled": true,

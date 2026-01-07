@@ -163,6 +163,12 @@ async fn run_standard_broker(
             broker.name
         );
     }
+    if broker.batch_repeat == 0 {
+        anyhow::bail!(
+            "batch_repeat must be >= 1 for {} in config_standard.json.",
+            broker.name
+        );
+    }
 
     if test_mode {
         println!(
@@ -309,8 +315,13 @@ async fn run_standard_broker(
                 broker.name, target_epoch_ms, final_send_epoch_ms
             );
 
+            let total_orders = broker
+                .orders
+                .len()
+                .checked_mul(broker.batch_repeat)
+                .context("batch_repeat is too large for total orders")?;
             let mut order_index = 0usize;
-            while order_index < broker.orders.len() {
+            while order_index < total_orders {
                 let scheduled_epoch_ms =
                     final_send_epoch_ms + order_index as i64 * broker.batch_delay_ms as i64;
                 let now_epoch_ms = current_epoch_millis()?;
@@ -336,7 +347,7 @@ async fn run_standard_broker(
                     actual_epoch_us
                 );
 
-                let order = &broker.orders[order_index];
+                let order = &broker.orders[order_index % broker.orders.len()];
                 let order_json = serde_json::to_string(order)?;
                 standard_broker::send_order(
                     &broker,
@@ -453,6 +464,12 @@ async fn run_exir_broker(
     if broker.orders.is_empty() {
         anyhow::bail!(
             "No orders configured for {} in config_exir.json.",
+            broker.name
+        );
+    }
+    if broker.batch_repeat == 0 {
+        anyhow::bail!(
+            "batch_repeat must be >= 1 for {} in config_exir.json.",
             broker.name
         );
     }
@@ -602,8 +619,13 @@ async fn run_exir_broker(
                 broker.name, target_epoch_ms, final_send_epoch_ms
             );
 
+            let total_orders = broker
+                .orders
+                .len()
+                .checked_mul(broker.batch_repeat)
+                .context("batch_repeat is too large for total orders")?;
             let mut order_index = 0usize;
-            while order_index < broker.orders.len() {
+            while order_index < total_orders {
                 let scheduled_epoch_ms =
                     final_send_epoch_ms + order_index as i64 * broker.batch_delay_ms as i64;
                 let now_epoch_ms = current_epoch_millis()?;
@@ -629,7 +651,7 @@ async fn run_exir_broker(
                     actual_epoch_us
                 );
 
-                let order = &broker.orders[order_index];
+                let order = &broker.orders[order_index % broker.orders.len()];
                 let order_json = serde_json::to_string(order)?;
                 exir_broker::send_order(
                     &broker,
@@ -753,6 +775,9 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
 
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config.json.");
+    }
+    if config.batch_repeat == 0 {
+        anyhow::bail!("batch_repeat must be >= 1 in config.json.");
     }
 
     if test_mode {
@@ -890,8 +915,13 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
                 target_epoch_ms, final_send_epoch_ms
             );
 
+            let total_orders = config
+                .orders
+                .len()
+                .checked_mul(config.batch_repeat)
+                .context("batch_repeat is too large for total orders")?;
             let mut order_index = 0usize;
-            while order_index < config.orders.len() {
+            while order_index < total_orders {
                 let scheduled_epoch_ms =
                     final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
                 let now_epoch_ms = current_epoch_millis()?;
@@ -915,7 +945,7 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
                     actual_epoch_us
                 );
 
-                let order = &config.orders[order_index];
+                let order = &config.orders[order_index % config.orders.len()];
                 mofid::send_order(
                     &config,
                     order,
@@ -1261,6 +1291,9 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_danayan.json.");
     }
+    if config.batch_repeat == 0 {
+        anyhow::bail!("batch_repeat must be >= 1 in config_danayan.json.");
+    }
 
     if test_mode {
         println!("[Danayan] Test mode: sending one order immediately without scheduling.");
@@ -1397,8 +1430,13 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
                 target_epoch_ms, final_send_epoch_ms
             );
 
+            let total_orders = config
+                .orders
+                .len()
+                .checked_mul(config.batch_repeat)
+                .context("batch_repeat is too large for total orders")?;
             let mut order_index = 0usize;
-            while order_index < config.orders.len() {
+            while order_index < total_orders {
                 let scheduled_epoch_ms =
                     final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
                 let now_epoch_ms = current_epoch_millis()?;
@@ -1422,7 +1460,7 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
                     actual_epoch_us
                 );
 
-                let order = &config.orders[order_index];
+                let order = &config.orders[order_index % config.orders.len()];
                 danayan::send_order(
                     &config,
                     order,
@@ -2018,6 +2056,9 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
     if config.orders.is_empty() {
         anyhow::bail!("No orders configured in config_bidar.json.");
     }
+    if config.batch_repeat == 0 {
+        anyhow::bail!("batch_repeat must be >= 1 in config_bidar.json.");
+    }
 
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
 
@@ -2171,8 +2212,13 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
                 target_epoch_ms, final_send_epoch_ms
             );
 
+            let total_orders = config
+                .orders
+                .len()
+                .checked_mul(config.batch_repeat)
+                .context("batch_repeat is too large for total orders")?;
             let mut order_index = 0usize;
-            while order_index < config.orders.len() {
+            while order_index < total_orders {
                 let scheduled_epoch_ms =
                     final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
                 let now_epoch_ms = current_epoch_millis()?;
@@ -2196,7 +2242,7 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
                     actual_epoch_us
                 );
 
-                let order = &config.orders[order_index];
+                let order = &config.orders[order_index % config.orders.len()];
                 bidar::send_order(
                     &config,
                     order,

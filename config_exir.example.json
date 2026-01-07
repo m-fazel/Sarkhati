@@ -9,6 +9,7 @@
       "origin": "https://charisma.exirbroker.com",
       "referer": "https://charisma.exirbroker.com/exir/mainNew",
       "batch_delay_ms": 100,
+      "batch_repeat": 1,
       "target_time": "08:45:00.000",
       "calibration": {
         "enabled": true,
@@ -44,6 +45,7 @@
       "origin": "https://artan.exirbroker.com",
       "referer": "https://artan.exirbroker.com/exir/mainNew",
       "batch_delay_ms": 100,
+      "batch_repeat": 1,
       "target_time": "08:45:00.000",
       "calibration": {
         "enabled": true,
@@ -79,6 +81,7 @@
       "origin": "https://nibbourse.exirbroker.com",
       "referer": "https://nibbourse.exirbroker.com/exir/mainNew",
       "batch_delay_ms": 100,
+      "batch_repeat": 1,
       "target_time": "08:45:00.000",
       "calibration": {
         "enabled": true,

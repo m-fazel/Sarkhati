@@ -17,6 +17,10 @@ pub fn default_batch_delay() -> u64 {
     100
 }
 
+pub fn default_batch_repeat() -> usize {
+    1
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct StandardBrokersConfig {
     pub brokers: Vec<StandardBrokerConfig>,
@@ -34,6 +38,8 @@ pub struct StandardBrokerConfig {
     pub orders: Vec<StandardOrderData>,
     #[serde(default = "default_batch_delay")]
     pub batch_delay_ms: u64,
+    #[serde(default = "default_batch_repeat")]
+    pub batch_repeat: usize,
     #[serde(default)]
     pub target_time: Option<String>,
     #[serde(default)]

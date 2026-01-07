@@ -10,7 +10,7 @@
       "referer": "https://charisma.exirbroker.com/exir/mainNew",
       "batch_delay_ms": 100,
       "batch_repeat": 1,
-      "target_time": "08:45:00.000",
+      "target_time": "08:45:00.050",
       "calibration": {
         "enabled": true,
         "probe_count": 10,
@@ -46,7 +46,7 @@
       "referer": "https://artan.exirbroker.com/exir/mainNew",
       "batch_delay_ms": 100,
       "batch_repeat": 1,
-      "target_time": "08:45:00.000",
+      "target_time": "08:45:00.050",
       "calibration": {
         "enabled": true,
         "probe_count": 10,
@@ -82,7 +82,7 @@
       "referer": "https://nibbourse.exirbroker.com/exir/mainNew",
       "batch_delay_ms": 100,
       "batch_repeat": 1,
-      "target_time": "08:45:00.000",
+      "target_time": "08:45:00.050",
       "calibration": {
         "enabled": true,
         "probe_count": 10,

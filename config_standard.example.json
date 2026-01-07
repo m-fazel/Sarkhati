@@ -8,6 +8,7 @@
       "origin": "https://online.samanbourse.ir",
       "referer": "https://online.samanbourse.ir/",
       "batch_delay_ms": 100,
+      "batch_repeat": 1,
       "target_time": "08:45:00.000",
       "calibration": {
         "enabled": true,
@@ -47,6 +48,7 @@
       "origin": "https://silver.daybroker.ir",
       "referer": "https://silver.daybroker.ir/",
       "batch_delay_ms": 100,
+      "batch_repeat": 1,
       "target_time": "08:45:00.000",
       "calibration": {
         "enabled": true,
@@ -86,6 +88,7 @@
       "origin": "https://online.maskanbrokerage.ir",
       "referer": "https://online.maskanbrokerage.ir/",
       "batch_delay_ms": 100,
+      "batch_repeat": 1,
       "target_time": "08:45:00.000",
       "calibration": {
         "enabled": true,
@@ -125,6 +128,7 @@
       "origin": "https://online.oibourse.ir",
       "referer": "https://online.oibourse.ir/",
       "batch_delay_ms": 100,
+      "batch_repeat": 1,
       "target_time": "08:45:00.000",
       "calibration": {
         "enabled": true,

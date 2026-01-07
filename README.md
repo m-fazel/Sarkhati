@@ -95,7 +95,7 @@ Press `Ctrl+C` to stop.
 {
   "cookie": "",
   "authorization": "YOUR_BEARER_TOKEN",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
   "order_url": "https://mofidonline.com/apigateway/api/v1/Order/send",
   "batch_delay_ms": 100,
   "orders": [
@@ -129,7 +129,7 @@ Press `Ctrl+C` to stop.
 ```json
 {
   "cookie": "YOUR_COOKIE_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
   "order_url": "https://api2.bmibourse.ir/Web/V1/Order/Post",
   "batch_delay_ms": 100,
   "orders": [
@@ -174,7 +174,7 @@ Press `Ctrl+C` to stop.
 ```json
 {
   "cookie": "YOUR_COOKIE_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
   "order_url": "https://otapi.danayan.broker/api/v1/TseOms/RegisterOrder",
   "batch_delay_ms": 100,
   "orders": [
@@ -208,7 +208,7 @@ Press `Ctrl+C` to stop.
 ```json
 {
   "cookie": "YOUR_COOKIE_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
   "order_url": "https://api.oibourse.ir/Web/V1/Order/Post",
   "batch_delay_ms": 100,
   "orders": [
@@ -254,7 +254,7 @@ Press `Ctrl+C` to stop.
 {
   "cookie": "YOUR_COOKIE_HERE",
   "nt": "YOUR_NT_TOKEN_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
   "order_url": "https://arzeshafarin.exirbroker.com/api/v1/order",
   "batch_delay_ms": 100,
   "orders": [
@@ -294,7 +294,7 @@ Press `Ctrl+C` to stop.
 ```json
 {
   "authorization": "YOUR_BEARER_TOKEN_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
   "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
   "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
   "batch_delay_ms": 100,

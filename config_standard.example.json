@@ -3,7 +3,7 @@
     {
       "name": "saman",
       "cookie": "PASTE_YOUR_COOKIE_HERE",
-      "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
       "order_url": "https://api.samanbourse.ir/Web/V1/Order/Post",
       "origin": "https://online.samanbourse.ir",
       "referer": "https://online.samanbourse.ir/",
@@ -42,7 +42,7 @@
     {
       "name": "day",
       "cookie": "PASTE_YOUR_COOKIE_HERE",
-      "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
       "order_url": "https://api.daybroker.ir/Web/V1/Order/Post",
       "origin": "https://silver.daybroker.ir",
       "referer": "https://silver.daybroker.ir/",
@@ -81,7 +81,7 @@
     {
       "name": "maskan",
       "cookie": "PASTE_YOUR_COOKIE_HERE",
-      "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
       "order_url": "https://api.maskanbrokerage.ir/Web/V1/Order/Post",
       "origin": "https://online.maskanbrokerage.ir",
       "referer": "https://online.maskanbrokerage.ir/",
@@ -120,7 +120,7 @@
     {
       "name": "ordibehesht",
       "cookie": "PASTE_YOUR_COOKIE_HERE",
-      "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
       "order_url": "https://api.oibourse.ir/Web/V1/Order/Post",
       "origin": "https://online.oibourse.ir",
       "referer": "https://online.oibourse.ir/",

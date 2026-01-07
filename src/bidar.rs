@@ -30,7 +30,7 @@ pub struct BidarConfig {
 }
 
 fn default_user_agent() -> String {
-    "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0".to_string()
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36".to_string()
 }
 
 fn default_order_url() -> String {

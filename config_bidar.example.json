@@ -1,6 +1,6 @@
 {
   "authorization": "PASTE_YOUR_BEARER_TOKEN_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64; rv:145.0) Gecko/20100101 Firefox/145.0",
+  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
   "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
   "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
   "batch_delay_ms": 100,

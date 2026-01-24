@@ -454,8 +454,6 @@ async fn run_standard_broker(
             }
         }
     }
-
-    Ok(())
 }
 
 async fn run_exir_broker(
@@ -777,8 +775,6 @@ async fn run_exir_broker(
             }
         }
     }
-
-    Ok(())
 }
 
 async fn run_mofid_account(
@@ -2566,8 +2562,6 @@ async fn run_bidar_account(
             }
         }
     }
-
-    Ok(())
 }
 
 async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {

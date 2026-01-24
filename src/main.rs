@@ -8,9 +8,12 @@ mod bidar;
 mod calibration;
 mod danayan;
 mod exir_broker;
+mod logging;
 mod mofid;
 mod rate_limiter;
 mod standard_broker;
+
+use crate::logging::{log_error, log_info, log_success, log_warn};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,32 +26,51 @@ async fn main() -> Result<()> {
 
     let broker = match args.get(1).map(|s| s.as_str()) {
         Some("test") | Some("--test") | Some("curl") | Some("--curl") => {
-            eprintln!(
-                "Usage: {} <mofid|danayan|bidar|all|BROKER_NAME> [test] [curl]",
-                args[0]
+            log_error(
+                "CLI",
+                &format!(
+                    "Usage: {} <mofid|danayan|bidar|all|BROKER_NAME> [test] [curl]",
+                    args[0]
+                ),
             );
-            eprintln!("BROKER_NAME comes from config_standard.json or config_exir.json.");
-            eprintln!("The 'test' and 'curl' flags should come after the broker name.");
+            log_error(
+                "CLI",
+                "BROKER_NAME comes from config_standard.json or config_exir.json.",
+            );
+            log_error(
+                "CLI",
+                "The 'test' and 'curl' flags should come after the broker name.",
+            );
             std::process::exit(1);
         }
         Some(other) => other,
         None => {
-            eprintln!(
-                "Usage: {} <mofid|danayan|bidar|all|BROKER_NAME> [test] [curl]",
-                args[0]
+            log_error(
+                "CLI",
+                &format!(
+                    "Usage: {} <mofid|danayan|bidar|all|BROKER_NAME> [test] [curl]",
+                    args[0]
+                ),
             );
-            eprintln!("BROKER_NAME comes from config_standard.json or config_exir.json.");
+            log_error(
+                "CLI",
+                "BROKER_NAME comes from config_standard.json or config_exir.json.",
+            );
             std::process::exit(1);
         }
     };
 
     if test_mode {
         if curl_only {
-            println!(
-                "*** TEST MODE + CURL ONLY: Will print curl commands without sending requests ***\n"
+            log_warn(
+                "System",
+                "*** TEST MODE + CURL ONLY: Will print curl commands without sending requests ***",
             );
         } else {
-            println!("*** TEST MODE: Will send one order immediately without timers ***\n");
+            log_warn(
+                "System",
+                "*** TEST MODE: Will send one order immediately without timers ***",
+            );
         }
     }
 
@@ -65,26 +87,26 @@ async fn main() -> Result<()> {
 }
 
 async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
-    println!("Starting Sarkhati - All Brokers in Parallel\n");
+    log_info("System", "Starting Sarkhati - All Brokers in Parallel");
 
     let standard_config = standard_broker::load_config("config_standard.json")?;
     let exir_config = exir_broker::load_config("config_exir.json")?;
 
     let mofid_handle = tokio::spawn(async move {
         if let Err(e) = run_mofid(test_mode, curl_only).await {
-            eprintln!("[Mofid] Error: {}", e);
+            log_error("Mofid", &format!("Stopped with error: {}", e));
         }
     });
 
     let danayan_handle = tokio::spawn(async move {
         if let Err(e) = run_danayan(test_mode, curl_only).await {
-            eprintln!("[Danayan] Error: {}", e);
+            log_error("Danayan", &format!("Stopped with error: {}", e));
         }
     });
 
     let bidar_handle = tokio::spawn(async move {
         if let Err(e) = run_bidar(test_mode, curl_only).await {
-            eprintln!("[Bidar] Error: {}", e);
+            log_error("Bidar", &format!("Stopped with error: {}", e));
         }
     });
 
@@ -92,7 +114,7 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     for broker in standard_config.accounts.clone() {
         let handle = tokio::spawn(async move {
             if let Err(e) = run_standard_broker(broker, test_mode, curl_only).await {
-                eprintln!("[Standard] Error: {}", e);
+                log_error("Standard", &format!("Stopped with error: {}", e));
             }
         });
         standard_handles.push(handle);
@@ -102,7 +124,7 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     for broker in exir_config.accounts.clone() {
         let handle = tokio::spawn(async move {
             if let Err(e) = run_exir_broker(broker, test_mode, curl_only).await {
-                eprintln!("[Exir] Error: {}", e);
+                log_error("Exir", &format!("Stopped with error: {}", e));
             }
         });
         exir_handles.push(handle);
@@ -142,7 +164,10 @@ async fn run_standard_broker(
 ) -> Result<()> {
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
 
-    println!("Starting Sarkhati - {} Order Sender", broker.name);
+    log_info(
+        &broker.name,
+        &format!("Starting Sarkhati - {} Order Sender", broker.name),
+    );
 
     if broker.cookie.is_empty() {
         anyhow::bail!(
@@ -208,11 +233,13 @@ async fn run_standard_broker(
             let target_epoch_ms = target_datetime.timestamp_millis();
             let now_epoch_ms = current_epoch_millis()?;
             if now_epoch_ms < target_epoch_ms {
-                println!(
-                    "[{}] Next target_time={} (epoch_ms={})",
-                    broker.name,
-                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    target_epoch_ms
+                log_info(
+                    &broker.name,
+                    &format!(
+                        "Next target_time={} (epoch_ms={})",
+                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        target_epoch_ms
+                    ),
                 );
             }
 
@@ -463,7 +490,10 @@ async fn run_exir_broker(
 ) -> Result<()> {
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
 
-    println!("Starting Sarkhati - {} Order Sender", broker.name);
+    log_info(
+        &broker.name,
+        &format!("Starting Sarkhati - {} Order Sender", broker.name),
+    );
 
     if broker.cookie.is_empty() {
         anyhow::bail!(
@@ -529,11 +559,13 @@ async fn run_exir_broker(
             let target_epoch_ms = target_datetime.timestamp_millis();
             let now_epoch_ms = current_epoch_millis()?;
             if now_epoch_ms < target_epoch_ms {
-                println!(
-                    "[{}] Next target_time={} (epoch_ms={})",
-                    broker.name,
-                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    target_epoch_ms
+                log_info(
+                    &broker.name,
+                    &format!(
+                        "Next target_time={} (epoch_ms={})",
+                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        target_epoch_ms
+                    ),
                 );
             }
 
@@ -785,7 +817,10 @@ async fn run_mofid_account(
 ) -> Result<()> {
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
 
-    println!("Starting Sarkhati - {} Order Sender", label);
+    log_info(
+        &label,
+        &format!("Starting Sarkhati - {} Order Sender", label),
+    );
 
     let use_cookie = !config.cookie.is_empty() && config.cookie != "PASTE_YOUR_COOKIE_HERE";
     let use_auth = !config.authorization.is_empty();
@@ -1147,7 +1182,7 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
         serde_json::from_str(&config_str).context("Failed to parse config_bmi.json")?;
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
 
-    println!("Starting Sarkhati - BMI Bourse Order Sender");
+    log_info("BMI", "Starting Sarkhati - BMI Bourse Order Sender");
 
     if config.cookie.is_empty() {
         anyhow::bail!("Cookie is required for BMI Bourse. Please set 'cookie' in config.json");
@@ -1166,9 +1201,9 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     if let Some(target_time_str) = &config.target_time {
-        println!(
-            "[BMI] Scheduled mode enabled for target time {}",
-            target_time_str
+        log_info(
+            "BMI",
+            &format!("Scheduled mode enabled for target time {}", target_time_str),
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
@@ -1183,10 +1218,13 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
             let target_epoch_ms = target_datetime.timestamp_millis();
             let now_epoch_ms = current_epoch_millis()?;
             if now_epoch_ms < target_epoch_ms {
-                println!(
-                    "[BMI] Next target_time={} (epoch_ms={})",
-                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    target_epoch_ms
+                log_info(
+                    "BMI",
+                    &format!(
+                        "Next target_time={} (epoch_ms={})",
+                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        target_epoch_ms
+                    ),
                 );
             }
 
@@ -1208,9 +1246,12 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    println!(
-                        "[BMI] Waiting {}ms before calibration window (epoch_ms={})",
-                        sleep_ms, calibration_start_epoch_ms
+                    log_info(
+                        "BMI",
+                        &format!(
+                            "Waiting {}ms before calibration window (epoch_ms={})",
+                            sleep_ms, calibration_start_epoch_ms
+                        ),
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
@@ -1237,7 +1278,7 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                         summary.last_probe_wall_time,
                     )
                 } else {
-                    println!("[BMI] Calibration disabled; using zero delay estimate.");
+                    log_info("BMI", "Calibration disabled; using zero delay estimate.");
                     (0, 0, std::time::SystemTime::now())
                 };
 
@@ -1269,17 +1310,23 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                 }
             }
 
-            println!(
-                "[BMI] target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                target_datetime.format("%H:%M:%S%.3f"),
-                final_send_time.format("%H:%M:%S%.3f"),
-                estimated_delay_ms,
-                safety_margin_ms,
-                effective_delay_ms
+            log_info(
+                "BMI",
+                &format!(
+                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                    target_datetime.format("%H:%M:%S%.3f"),
+                    final_send_time.format("%H:%M:%S%.3f"),
+                    estimated_delay_ms,
+                    safety_margin_ms,
+                    effective_delay_ms
+                ),
             );
-            println!(
-                "[BMI] target_epoch_ms={} final_send_epoch_ms={}",
-                target_epoch_ms, final_send_epoch_ms
+            log_info(
+                "BMI",
+                &format!(
+                    "target_epoch_ms={} final_send_epoch_ms={}",
+                    target_epoch_ms, final_send_epoch_ms
+                ),
             );
 
             let mut order_index = 0usize;
@@ -1288,10 +1335,13 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                     final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
                 let now_epoch_ms = current_epoch_millis()?;
                 if now_epoch_ms > scheduled_epoch_ms {
-                    println!(
-                        "[BMI] Warning: scheduled send time passed by {}ms for order #{}",
-                        now_epoch_ms - scheduled_epoch_ms,
-                        order_index + 1
+                    log_warn(
+                        "BMI",
+                        &format!(
+                            "Scheduled send time passed by {}ms for order #{}",
+                            now_epoch_ms - scheduled_epoch_ms,
+                            order_index + 1
+                        ),
                     );
                 }
                 wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
@@ -1299,12 +1349,15 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                 let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
                 let actual_epoch_us = current_epoch_micros()?;
                 let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                println!(
-                    "[BMI] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
-                    order_index + 1,
-                    actual_send_time.format("%H:%M:%S%.3f"),
-                    drift_micros,
-                    actual_epoch_us
+                log_info(
+                    "BMI",
+                    &format!(
+                        "Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                        order_index + 1,
+                        actual_send_time.format("%H:%M:%S%.3f"),
+                        drift_micros,
+                        actual_epoch_us
+                    ),
                 );
 
                 let order = &config.orders[order_index];
@@ -1321,25 +1374,34 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
             }
 
             if test_mode {
-                println!("[BMI] Test mode: exiting after scheduled send");
+                log_info("BMI", "Test mode: exiting after scheduled send");
                 return Ok(());
             }
         }
     }
 
-    println!("Loaded {} order(s) from config", config.orders.len());
-    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
-    println!("Starting continuous order sending...\n");
+    log_info(
+        "BMI",
+        &format!("Loaded {} order(s) from config", config.orders.len()),
+    );
+    log_info(
+        "BMI",
+        &format!("Batch delay: {}ms between batches", config.batch_delay_ms),
+    );
+    log_info("BMI", "Starting continuous order sending...");
 
     let mut batch_number = 0u64;
     let batch_delay = config.batch_delay_ms;
 
     loop {
         batch_number += 1;
-        println!(
-            "=== Batch #{}: Sending {} orders ===",
-            batch_number,
-            config.orders.len()
+        log_info(
+            "BMI",
+            &format!(
+                "=== Batch #{}: Sending {} orders ===",
+                batch_number,
+                config.orders.len()
+            ),
         );
 
         let mut handles = Vec::new();
@@ -1361,12 +1423,14 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                 )
                 .await
                 {
-                    Ok(_) => println!(
-                        "✓ Batch #{}, Order #{}: Sent successfully",
-                        batch,
-                        index + 1
+                    Ok(_) => log_success(
+                        "BMI",
+                        &format!("Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     ),
-                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                    Err(e) => log_error(
+                        "BMI",
+                        &format!("Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                    ),
                 }
             });
             handles.push(handle);
@@ -1376,7 +1440,7 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
             for handle in handles {
                 let _ = handle.await;
             }
-            println!("[BMI] Test mode: exiting after one batch");
+            log_info("BMI", "Test mode: exiting after one batch");
             break;
         }
 
@@ -1394,7 +1458,10 @@ async fn run_danayan_account(
 ) -> Result<()> {
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
 
-    println!("Starting Sarkhati - {} Order Sender", label);
+    log_info(
+        &label,
+        &format!("Starting Sarkhati - {} Order Sender", label),
+    );
 
     if config.cookie.is_empty() {
         anyhow::bail!("Cookie is required for Danayan. Please set 'cookie' in config_danayan.json");
@@ -1747,7 +1814,10 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
         serde_json::from_str(&config_str).context("Failed to parse config_ordibehesht.json")?;
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
 
-    println!("Starting Sarkhati - Ordibehesht Order Sender");
+    log_info(
+        "Ordibehesht",
+        "Starting Sarkhati - Ordibehesht Order Sender",
+    );
 
     if config.cookie.is_empty() {
         anyhow::bail!(
@@ -1755,10 +1825,13 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
         );
     }
 
-    println!("Using Cookie authentication");
-    println!(
-        "Cookie preview: {}...",
-        &config.cookie[..config.cookie.len().min(50)]
+    log_info("Ordibehesht", "Using Cookie authentication");
+    log_info(
+        "Ordibehesht",
+        &format!(
+            "Cookie preview: {}...",
+            &config.cookie[..config.cookie.len().min(50)]
+        ),
     );
 
     if config.orders.is_empty() {
@@ -1766,9 +1839,9 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     if let Some(target_time_str) = &config.target_time {
-        println!(
-            "[Ordibehesht] Scheduled mode enabled for target time {}",
-            target_time_str
+        log_info(
+            "Ordibehesht",
+            &format!("Scheduled mode enabled for target time {}", target_time_str),
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
@@ -1783,10 +1856,13 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
             let target_epoch_ms = target_datetime.timestamp_millis();
             let now_epoch_ms = current_epoch_millis()?;
             if now_epoch_ms < target_epoch_ms {
-                println!(
-                    "[Ordibehesht] Next target_time={} (epoch_ms={})",
-                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    target_epoch_ms
+                log_info(
+                    "Ordibehesht",
+                    &format!(
+                        "Next target_time={} (epoch_ms={})",
+                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        target_epoch_ms
+                    ),
                 );
             }
 
@@ -1808,9 +1884,12 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    println!(
-                        "[Ordibehesht] Waiting {}ms before calibration window (epoch_ms={})",
-                        sleep_ms, calibration_start_epoch_ms
+                    log_info(
+                        "Ordibehesht",
+                        &format!(
+                            "Waiting {}ms before calibration window (epoch_ms={})",
+                            sleep_ms, calibration_start_epoch_ms
+                        ),
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
@@ -1838,7 +1917,10 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                         summary.last_probe_wall_time,
                     )
                 } else {
-                    println!("[Ordibehesht] Calibration disabled; using zero delay estimate.");
+                    log_info(
+                        "Ordibehesht",
+                        "Calibration disabled; using zero delay estimate.",
+                    );
                     (0, 0, std::time::SystemTime::now())
                 };
 
@@ -1870,17 +1952,23 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                 }
             }
 
-            println!(
-                "[Ordibehesht] target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                target_datetime.format("%H:%M:%S%.3f"),
-                final_send_time.format("%H:%M:%S%.3f"),
-                estimated_delay_ms,
-                safety_margin_ms,
-                effective_delay_ms
+            log_info(
+                "Ordibehesht",
+                &format!(
+                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                    target_datetime.format("%H:%M:%S%.3f"),
+                    final_send_time.format("%H:%M:%S%.3f"),
+                    estimated_delay_ms,
+                    safety_margin_ms,
+                    effective_delay_ms
+                ),
             );
-            println!(
-                "[Ordibehesht] target_epoch_ms={} final_send_epoch_ms={}",
-                target_epoch_ms, final_send_epoch_ms
+            log_info(
+                "Ordibehesht",
+                &format!(
+                    "target_epoch_ms={} final_send_epoch_ms={}",
+                    target_epoch_ms, final_send_epoch_ms
+                ),
             );
 
             let mut order_index = 0usize;
@@ -1889,10 +1977,13 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                     final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
                 let now_epoch_ms = current_epoch_millis()?;
                 if now_epoch_ms > scheduled_epoch_ms {
-                    println!(
-                        "[Ordibehesht] Warning: scheduled send time passed by {}ms for order #{}",
-                        now_epoch_ms - scheduled_epoch_ms,
-                        order_index + 1
+                    log_warn(
+                        "Ordibehesht",
+                        &format!(
+                            "Scheduled send time passed by {}ms for order #{}",
+                            now_epoch_ms - scheduled_epoch_ms,
+                            order_index + 1
+                        ),
                     );
                 }
                 wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
@@ -1900,12 +1991,15 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                 let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
                 let actual_epoch_us = current_epoch_micros()?;
                 let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                println!(
-                    "[Ordibehesht] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
-                    order_index + 1,
-                    actual_send_time.format("%H:%M:%S%.3f"),
-                    drift_micros,
-                    actual_epoch_us
+                log_info(
+                    "Ordibehesht",
+                    &format!(
+                        "Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                        order_index + 1,
+                        actual_send_time.format("%H:%M:%S%.3f"),
+                        drift_micros,
+                        actual_epoch_us
+                    ),
                 );
 
                 let order = &config.orders[order_index];
@@ -1922,25 +2016,34 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
             }
 
             if test_mode {
-                println!("[Ordibehesht] Test mode: exiting after scheduled send");
+                log_info("Ordibehesht", "Test mode: exiting after scheduled send");
                 return Ok(());
             }
         }
     }
 
-    println!("Loaded {} order(s) from config", config.orders.len());
-    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
-    println!("Starting continuous order sending...\n");
+    log_info(
+        "Ordibehesht",
+        &format!("Loaded {} order(s) from config", config.orders.len()),
+    );
+    log_info(
+        "Ordibehesht",
+        &format!("Batch delay: {}ms between batches", config.batch_delay_ms),
+    );
+    log_info("Ordibehesht", "Starting continuous order sending...");
 
     let mut batch_number = 0u64;
     let batch_delay = config.batch_delay_ms;
 
     loop {
         batch_number += 1;
-        println!(
-            "=== Batch #{}: Sending {} orders ===",
-            batch_number,
-            config.orders.len()
+        log_info(
+            "Ordibehesht",
+            &format!(
+                "=== Batch #{}: Sending {} orders ===",
+                batch_number,
+                config.orders.len()
+            ),
         );
 
         let mut handles = Vec::new();
@@ -1962,12 +2065,14 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                 )
                 .await
                 {
-                    Ok(_) => println!(
-                        "✓ Batch #{}, Order #{}: Sent successfully",
-                        batch,
-                        index + 1
+                    Ok(_) => log_success(
+                        "Ordibehesht",
+                        &format!("Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     ),
-                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                    Err(e) => log_error(
+                        "Ordibehesht",
+                        &format!("Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                    ),
                 }
             });
             handles.push(handle);
@@ -1977,7 +2082,7 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
             for handle in handles {
                 let _ = handle.await;
             }
-            println!("[Ordibehesht] Test mode: exiting after one batch");
+            log_info("Ordibehesht", "Test mode: exiting after one batch");
             break;
         }
 
@@ -1995,16 +2100,19 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
         serde_json::from_str(&config_str).context("Failed to parse config_alvand.json")?;
     let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
 
-    println!("Starting Sarkhati - Alvand Order Sender");
+    log_info("Alvand", "Starting Sarkhati - Alvand Order Sender");
 
     if config.cookie.is_empty() {
         anyhow::bail!("Cookie is required for Alvand. Please set 'cookie' in config_alvand.json");
     }
 
-    println!("Using Cookie authentication");
-    println!(
-        "Cookie preview: {}...",
-        &config.cookie[..config.cookie.len().min(50)]
+    log_info("Alvand", "Using Cookie authentication");
+    log_info(
+        "Alvand",
+        &format!(
+            "Cookie preview: {}...",
+            &config.cookie[..config.cookie.len().min(50)]
+        ),
     );
 
     if config.orders.is_empty() {
@@ -2012,9 +2120,9 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     if let Some(target_time_str) = &config.target_time {
-        println!(
-            "[Alvand] Scheduled mode enabled for target time {}",
-            target_time_str
+        log_info(
+            "Alvand",
+            &format!("Scheduled mode enabled for target time {}", target_time_str),
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
@@ -2029,10 +2137,13 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
             let target_epoch_ms = target_datetime.timestamp_millis();
             let now_epoch_ms = current_epoch_millis()?;
             if now_epoch_ms < target_epoch_ms {
-                println!(
-                    "[Alvand] Next target_time={} (epoch_ms={})",
-                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                    target_epoch_ms
+                log_info(
+                    "Alvand",
+                    &format!(
+                        "Next target_time={} (epoch_ms={})",
+                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                        target_epoch_ms
+                    ),
                 );
             }
 
@@ -2054,9 +2165,12 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                     latest_probe_finish_epoch_ms - expected_duration_ms;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    println!(
-                        "[Alvand] Waiting {}ms before calibration window (epoch_ms={})",
-                        sleep_ms, calibration_start_epoch_ms
+                    log_info(
+                        "Alvand",
+                        &format!(
+                            "Waiting {}ms before calibration window (epoch_ms={})",
+                            sleep_ms, calibration_start_epoch_ms
+                        ),
                     );
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
@@ -2083,7 +2197,7 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                         summary.last_probe_wall_time,
                     )
                 } else {
-                    println!("[Alvand] Calibration disabled; using zero delay estimate.");
+                    log_info("Alvand", "Calibration disabled; using zero delay estimate.");
                     (0, 0, std::time::SystemTime::now())
                 };
 
@@ -2115,17 +2229,23 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                 }
             }
 
-            println!(
-                "[Alvand] target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                target_datetime.format("%H:%M:%S%.3f"),
-                final_send_time.format("%H:%M:%S%.3f"),
-                estimated_delay_ms,
-                safety_margin_ms,
-                effective_delay_ms
+            log_info(
+                "Alvand",
+                &format!(
+                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                    target_datetime.format("%H:%M:%S%.3f"),
+                    final_send_time.format("%H:%M:%S%.3f"),
+                    estimated_delay_ms,
+                    safety_margin_ms,
+                    effective_delay_ms
+                ),
             );
-            println!(
-                "[Alvand] target_epoch_ms={} final_send_epoch_ms={}",
-                target_epoch_ms, final_send_epoch_ms
+            log_info(
+                "Alvand",
+                &format!(
+                    "target_epoch_ms={} final_send_epoch_ms={}",
+                    target_epoch_ms, final_send_epoch_ms
+                ),
             );
 
             let mut order_index = 0usize;
@@ -2134,10 +2254,13 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                     final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
                 let now_epoch_ms = current_epoch_millis()?;
                 if now_epoch_ms > scheduled_epoch_ms {
-                    println!(
-                        "[Alvand] Warning: scheduled send time passed by {}ms for order #{}",
-                        now_epoch_ms - scheduled_epoch_ms,
-                        order_index + 1
+                    log_warn(
+                        "Alvand",
+                        &format!(
+                            "Scheduled send time passed by {}ms for order #{}",
+                            now_epoch_ms - scheduled_epoch_ms,
+                            order_index + 1
+                        ),
                     );
                 }
                 wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
@@ -2145,12 +2268,15 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                 let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
                 let actual_epoch_us = current_epoch_micros()?;
                 let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                println!(
-                    "[Alvand] Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
-                    order_index + 1,
-                    actual_send_time.format("%H:%M:%S%.3f"),
-                    drift_micros,
-                    actual_epoch_us
+                log_info(
+                    "Alvand",
+                    &format!(
+                        "Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
+                        order_index + 1,
+                        actual_send_time.format("%H:%M:%S%.3f"),
+                        drift_micros,
+                        actual_epoch_us
+                    ),
                 );
 
                 let order = &config.orders[order_index];
@@ -2167,25 +2293,34 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
             }
 
             if test_mode {
-                println!("[Alvand] Test mode: exiting after scheduled send");
+                log_info("Alvand", "Test mode: exiting after scheduled send");
                 return Ok(());
             }
         }
     }
 
-    println!("Loaded {} order(s) from config", config.orders.len());
-    println!("Batch delay: {}ms between batches", config.batch_delay_ms);
-    println!("Starting continuous order sending...\n");
+    log_info(
+        "Alvand",
+        &format!("Loaded {} order(s) from config", config.orders.len()),
+    );
+    log_info(
+        "Alvand",
+        &format!("Batch delay: {}ms between batches", config.batch_delay_ms),
+    );
+    log_info("Alvand", "Starting continuous order sending...");
 
     let mut batch_number = 0u64;
     let batch_delay = config.batch_delay_ms;
 
     loop {
         batch_number += 1;
-        println!(
-            "=== Batch #{}: Sending {} orders ===",
-            batch_number,
-            config.orders.len()
+        log_info(
+            "Alvand",
+            &format!(
+                "=== Batch #{}: Sending {} orders ===",
+                batch_number,
+                config.orders.len()
+            ),
         );
 
         let mut handles = Vec::new();
@@ -2207,12 +2342,14 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                 )
                 .await
                 {
-                    Ok(_) => println!(
-                        "✓ Batch #{}, Order #{}: Sent successfully",
-                        batch,
-                        index + 1
+                    Ok(_) => log_success(
+                        "Alvand",
+                        &format!("Batch #{}, Order #{}: Sent successfully", batch, index + 1),
                     ),
-                    Err(e) => eprintln!("✗ Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                    Err(e) => log_error(
+                        "Alvand",
+                        &format!("Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
+                    ),
                 }
             });
             handles.push(handle);
@@ -2223,7 +2360,7 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
             for handle in handles {
                 let _ = handle.await;
             }
-            println!("[Alvand] Test mode: exiting after one batch");
+            log_info("Alvand", "Test mode: exiting after one batch");
             break;
         }
 
@@ -2239,7 +2376,10 @@ async fn run_bidar_account(
     test_mode: bool,
     curl_only: bool,
 ) -> Result<()> {
-    println!("Starting Sarkhati - {} Order Sender", label);
+    log_info(
+        &label,
+        &format!("Starting Sarkhati - {} Order Sender", label),
+    );
 
     if config.authorization.is_empty() {
         anyhow::bail!(
@@ -2600,26 +2740,6 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn colorize(code: &str, text: &str) -> String {
-    format!("\x1b[{}m{}\x1b[0m", code, text)
-}
-
-fn log_info(label: &str, message: &str) {
-    println!("{} [{}] {}", colorize("34", "ℹ"), label, message);
-}
-
-fn log_success(label: &str, message: &str) {
-    println!("{} [{}] {}", colorize("32", "✓"), label, message);
-}
-
-fn log_warn(label: &str, message: &str) {
-    eprintln!("{} [{}] {}", colorize("33", "⚠"), label, message);
-}
-
-fn log_error(label: &str, message: &str) {
-    eprintln!("{} [{}] {}", colorize("31", "✗"), label, message);
 }
 
 fn next_target_datetime(target_time: chrono::NaiveTime) -> Result<chrono::DateTime<chrono_tz::Tz>> {

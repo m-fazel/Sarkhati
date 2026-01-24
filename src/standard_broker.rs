@@ -23,7 +23,7 @@ pub fn default_batch_repeat() -> usize {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct StandardBrokersConfig {
-    pub brokers: Vec<StandardBrokerConfig>,
+    pub accounts: Vec<StandardBrokerConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -94,7 +94,7 @@ pub fn find_broker<'a>(
     name: &str,
 ) -> Option<&'a StandardBrokerConfig> {
     config
-        .brokers
+        .accounts
         .iter()
         .find(|broker| broker.name.eq_ignore_ascii_case(name))
 }
@@ -183,8 +183,6 @@ pub async fn send_order(
         HeaderValue::from_str(&body_bytes.len().to_string())?,
     );
 
-    println!("[{}] Sending order JSON: {}", broker.name, order_json);
-
     let response = client
         .post(&broker.order_url)
         .headers(headers)
@@ -200,9 +198,6 @@ pub async fn send_order(
     } else {
         response_text.clone()
     };
-
-    println!("[{}] Order response status: {}", broker.name, status);
-    println!("[{}] Order response body: {}", broker.name, decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

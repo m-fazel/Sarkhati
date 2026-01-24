@@ -91,22 +91,29 @@ Press `Ctrl+C` to stop.
 
 ### Mofid Online (`config_mofid.json`)
 
+You can provide a single account object (backwards compatible) or an `accounts` array for multiple Mofid accounts.
+
 ```json
 {
-  "cookie": "",
-  "authorization": "YOUR_BEARER_TOKEN",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-  "order_url": "https://mofidonline.com/apigateway/api/v1/Order/send",
-  "batch_delay_ms": 100,
-  "orders": [
+  "accounts": [
     {
-      "orderSide": "Buy",
-      "price": 2474,
-      "quantity": 1,
-      "symbolIsin": "IRO1NMAD0001",
-      "validityType": 0,
-      "validityDate": null,
-      "orderFrom": "Titan"
+      "name": "primary",
+      "cookie": "",
+      "authorization": "YOUR_BEARER_TOKEN",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+      "order_url": "https://mofidonline.com/apigateway/api/v1/Order/send",
+      "batch_delay_ms": 100,
+      "orders": [
+        {
+          "orderSide": "Buy",
+          "price": 2474,
+          "quantity": 1,
+          "symbolIsin": "IRO1NMAD0001",
+          "validityType": 0,
+          "validityDate": null,
+          "orderFrom": "Titan"
+        }
+      ]
     }
   ]
 }
@@ -171,21 +178,28 @@ Press `Ctrl+C` to stop.
 
 ### Danayan (`config_danayan.json`)
 
+You can provide a single account object (backwards compatible) or an `accounts` array for multiple Danayan accounts.
+
 ```json
 {
-  "cookie": "YOUR_COOKIE_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-  "order_url": "https://otapi.danayan.broker/api/v1/TseOms/RegisterOrder",
-  "batch_delay_ms": 100,
-  "orders": [
+  "accounts": [
     {
-      "orderValidityType": 1,
-      "orderPaymentGateway": 1,
-      "price": 2474,
-      "quantity": 1,
-      "disclosedQuantity": null,
-      "isin": "IRO1NMAD0001",
-      "orderSide": 1
+      "name": "primary",
+      "cookie": "YOUR_COOKIE_HERE",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+      "order_url": "https://otapi.danayan.broker/api/v1/TseOms/RegisterOrder",
+      "batch_delay_ms": 100,
+      "orders": [
+        {
+          "orderValidityType": 1,
+          "orderPaymentGateway": 1,
+          "price": 2474,
+          "quantity": 1,
+          "disclosedQuantity": null,
+          "isin": "IRO1NMAD0001",
+          "orderSide": 1
+        }
+      ]
     }
   ]
 }
@@ -291,20 +305,27 @@ Press `Ctrl+C` to stop.
 
 ### Bidar Trader (`config_bidar.json`)
 
+You can provide a single account object (backwards compatible) or an `accounts` array for multiple Bidar accounts.
+
 ```json
 {
-  "authorization": "YOUR_BEARER_TOKEN_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-  "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
-  "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
-  "batch_delay_ms": 100,
-  "orders": [
+  "accounts": [
     {
-      "type": "LIMIT",
-      "quantity": "1",
-      "isin": "IRO1NMAD0001",
-      "validity": "DAY",
-      "price": "2548"
+      "name": "primary",
+      "authorization": "YOUR_BEARER_TOKEN_HERE",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+      "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
+      "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
+      "batch_delay_ms": 100,
+      "orders": [
+        {
+          "type": "LIMIT",
+          "quantity": "1",
+          "isin": "IRO1NMAD0001",
+          "validity": "DAY",
+          "price": "2548"
+        }
+      ]
     }
   ]
 }
@@ -555,4 +576,3 @@ This software is provided as-is for educational purposes. Use at your own risk. 
 ## License
 
 MIT
-

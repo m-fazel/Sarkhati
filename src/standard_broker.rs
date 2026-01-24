@@ -200,6 +200,11 @@ pub async fn send_order(
         response_text.clone()
     };
 
+    log_info(
+        &broker.name,
+        &format!("Order response status: {}", status),
+    );
+
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);
     }

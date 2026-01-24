@@ -1,3 +1,4 @@
+use crate::logging::log_info;
 use crate::rate_limiter::RateLimiter;
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
@@ -96,12 +97,12 @@ where
     let mut last_probe_wall = SystemTime::now();
     let mut last_wall_time = SystemTime::now();
 
-    println!(
-        "{} Calibration enabled: {} probes every {}ms (warmup: {})",
+    log_info(
         broker_label,
-        calibration.probe_count,
-        calibration.probe_interval_ms,
-        calibration.warmup_probes
+        &format!(
+            "Calibration enabled: {} probes every {}ms (warmup: {})",
+            calibration.probe_count, calibration.probe_interval_ms, calibration.warmup_probes
+        ),
     );
 
     for probe_index in 0..calibration.probe_count {
@@ -116,14 +117,16 @@ where
         let (rtt_ms, rtt_micros, status) = send_probe().await?;
         last_probe_wall = SystemTime::now();
 
-        println!(
-            "{} Probe #{}/{} status={} rtt={}ms ({}µs)",
+        log_info(
             broker_label,
-            probe_index + 1,
-            calibration.probe_count,
-            status,
-            rtt_ms,
-            rtt_micros
+            &format!(
+                "Probe #{}/{} status={} rtt={}ms ({}µs)",
+                probe_index + 1,
+                calibration.probe_count,
+                status,
+                rtt_ms,
+                rtt_micros
+            ),
         );
 
         if rtt_ms > calibration.max_acceptable_rtt_ms {
@@ -173,17 +176,19 @@ where
         CalibrationEstimator::Ewma => ewma(&samples_ms, 0.3),
     };
 
-    println!(
-        "{} Calibration stats: min={}ms p50={}ms p75={}ms p90={}ms max={}ms jitter={}ms estimator={:?} estimate={}ms",
+    log_info(
         broker_label,
-        min_ms,
-        p50_ms,
-        p75_ms,
-        p90_ms,
-        max_ms,
-        jitter_ms,
-        calibration.estimator,
-        estimated_delay_ms
+        &format!(
+            "Calibration stats: min={}ms p50={}ms p75={}ms p90={}ms max={}ms jitter={}ms estimator={:?} estimate={}ms",
+            min_ms,
+            p50_ms,
+            p75_ms,
+            p90_ms,
+            max_ms,
+            jitter_ms,
+            calibration.estimator,
+            estimated_delay_ms
+        ),
     );
 
     Ok(CalibrationSummary {

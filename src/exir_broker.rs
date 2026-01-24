@@ -1,4 +1,5 @@
 use crate::calibration::{self, CalibrationConfig};
+use crate::logging::{log_info, log_raw_stdout};
 use crate::rate_limiter::RateLimiter;
 use anyhow::{Context, Result};
 use chrono::{Timelike, Utc};
@@ -137,8 +138,8 @@ pub async fn send_order(
     let x_app_n = calculate_x_app_n(&broker.nt, &broker.order_url);
 
     if test_mode {
-        println!("[{}] Equivalent curl command:", broker.name);
-        println!(
+        log_info(&broker.name, "Equivalent curl command:");
+        log_raw_stdout(&format!(
             r#"curl '{}' \
   --compressed \
   -X POST \
@@ -166,8 +167,8 @@ pub async fn send_order(
             broker.origin,
             broker.cookie,
             order_json
-        );
-        println!();
+        ));
+        log_raw_stdout("");
 
         if curl_only {
             return Ok(());

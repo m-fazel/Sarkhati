@@ -1,4 +1,5 @@
 use crate::calibration::{self, CalibrationConfig};
+use crate::logging::{log_info, log_raw_stdout};
 use crate::rate_limiter::RateLimiter;
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
@@ -115,8 +116,8 @@ pub async fn send_order(
         } else {
             String::new()
         };
-        println!("[Bidar] Equivalent curl command:");
-        println!(
+        log_info("Bidar", "Equivalent curl command:");
+        log_raw_stdout(&format!(
             r#"curl '{}' \
   --compressed \
   -X POST \
@@ -138,8 +139,8 @@ pub async fn send_order(
   -H 'TE: trailers' \
   --data-raw '{}'"#,
             config.order_url, config.user_agent, auth_value, x_user_trace_header, order_json
-        );
-        println!();
+        ));
+        log_raw_stdout("");
 
         // If curl_only, don't send the request
         if curl_only {

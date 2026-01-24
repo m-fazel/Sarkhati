@@ -1,4 +1,5 @@
 use crate::calibration::{self, CalibrationConfig};
+use crate::logging::{log_info, log_raw_stdout};
 use crate::rate_limiter::RateLimiter;
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
@@ -91,8 +92,8 @@ pub async fn send_order(
 
     // Print curl command in test mode
     if test_mode {
-        println!("[Danayan] Equivalent curl command:");
-        println!(
+        log_info("Danayan", "Equivalent curl command:");
+        log_raw_stdout(&format!(
             r#"curl '{}' \
   --compressed \
   -X POST \
@@ -112,8 +113,8 @@ pub async fn send_order(
   -H 'Cache-Control: no-cache' \
   --data-raw '{}'"#,
             config.order_url, config.user_agent, config.cookie, order_json
-        );
-        println!();
+        ));
+        log_raw_stdout("");
 
         // If curl_only, don't send the request
         if curl_only {

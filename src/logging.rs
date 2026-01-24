@@ -42,16 +42,6 @@ fn write_stdout_block(message: &str) {
     });
 }
 
-fn write_stderr_block(message: &str) {
-    with_log_lock(|| {
-        let mut out = io::stderr().lock();
-        let _ = write!(out, "{}", message);
-        if !message.ends_with('\n') {
-            let _ = writeln!(out);
-        }
-    });
-}
-
 fn format_line(level: &str, color: &str, label: &str, message: &str, icon: &str) -> String {
     let timestamp = timestamp();
     let symbol = colorize(color, icon);
@@ -80,8 +70,4 @@ pub fn log_error(label: &str, message: &str) {
 
 pub fn log_raw_stdout(message: &str) {
     write_stdout_block(message);
-}
-
-pub fn log_raw_stderr(message: &str) {
-    write_stderr_block(message);
 }

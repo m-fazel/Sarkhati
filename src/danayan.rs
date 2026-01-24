@@ -177,6 +177,13 @@ pub async fn send_order(
         response_text.clone()
     };
 
+    let label = config
+        .name
+        .as_deref()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("Danayan");
+    log_info(label, &format!("Order response status: {}", status));
+
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);
     }

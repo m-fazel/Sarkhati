@@ -11,6 +11,8 @@ use std::time::Instant;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct BidarConfig {
+    #[serde(default)]
+    pub name: Option<String>,
     pub authorization: String,
     #[serde(default = "default_user_agent")]
     pub user_agent: String,
@@ -29,6 +31,24 @@ pub struct BidarConfig {
     pub calibration: Option<CalibrationConfig>,
     #[serde(default)]
     pub delay_model: BidarDelayModel,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum BidarConfigFile {
+    Single(BidarConfig),
+    Multiple { accounts: Vec<BidarConfig> },
+    List(Vec<BidarConfig>),
+}
+
+impl BidarConfig {
+    pub fn display_name(&self, fallback: &str) -> String {
+        self.name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(fallback)
+            .to_string()
+    }
 }
 
 fn default_user_agent() -> String {
@@ -168,8 +188,6 @@ pub async fn send_order(
         HeaderValue::from_str(&body_bytes.len().to_string())?,
     );
 
-    println!("[Bidar] Sending order JSON: {}", order_json);
-
     let response = client
         .post(&config.order_url)
         .headers(headers)
@@ -185,9 +203,6 @@ pub async fn send_order(
     } else {
         response_text.clone()
     };
-
-    println!("[Bidar] Order response status: {}", status);
-    println!("[Bidar] Order response body: {}", decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

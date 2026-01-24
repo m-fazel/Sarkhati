@@ -24,7 +24,7 @@ fn default_batch_repeat() -> usize {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ExirBrokersConfig {
-    pub brokers: Vec<ExirBrokerConfig>,
+    pub accounts: Vec<ExirBrokerConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -81,7 +81,7 @@ pub fn load_config(path: &str) -> Result<ExirBrokersConfig> {
 
 pub fn find_broker<'a>(config: &'a ExirBrokersConfig, name: &str) -> Option<&'a ExirBrokerConfig> {
     config
-        .brokers
+        .accounts
         .iter()
         .find(|broker| broker.name.eq_ignore_ascii_case(name))
 }
@@ -135,7 +135,6 @@ pub async fn send_order(
     let client = reqwest::Client::new();
 
     let x_app_n = calculate_x_app_n(&broker.nt, &broker.order_url);
-    println!("[{}] Generated X-App-N: {}", broker.name, x_app_n);
 
     if test_mode {
         println!("[{}] Equivalent curl command:", broker.name);
@@ -213,8 +212,6 @@ pub async fn send_order(
         HeaderValue::from_str(&body_bytes.len().to_string())?,
     );
 
-    println!("[{}] Sending order JSON: {}", broker.name, order_json);
-
     let response = client
         .post(&broker.order_url)
         .headers(headers)
@@ -230,9 +227,6 @@ pub async fn send_order(
     } else {
         response_text.clone()
     };
-
-    println!("[{}] Order response status: {}", broker.name, status);
-    println!("[{}] Order response body: {}", broker.name, decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

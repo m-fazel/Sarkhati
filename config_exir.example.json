@@ -1,5 +1,5 @@
 {
-  "brokers": [
+  "accounts": [
     {
       "name": "charisma",
       "cookie": "PASTE_YOUR_COOKIE_HERE",

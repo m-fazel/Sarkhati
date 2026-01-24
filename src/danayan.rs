@@ -1,16 +1,18 @@
 use crate::calibration::{self, CalibrationConfig};
 use crate::rate_limiter::RateLimiter;
 use anyhow::{Context, Result};
+use reqwest::StatusCode;
 use reqwest::header::{
-    HeaderMap, HeaderValue, ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, ORIGIN,
+    ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderMap, HeaderValue, ORIGIN,
     USER_AGENT,
 };
-use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DanayanConfig {
+    #[serde(default)]
+    pub name: Option<String>,
     pub cookie: String,
     #[serde(default = "default_user_agent")]
     pub user_agent: String,
@@ -25,6 +27,24 @@ pub struct DanayanConfig {
     pub target_time: Option<String>,
     #[serde(default)]
     pub calibration: Option<CalibrationConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum DanayanConfigFile {
+    Single(DanayanConfig),
+    Multiple { accounts: Vec<DanayanConfig> },
+    List(Vec<DanayanConfig>),
+}
+
+impl DanayanConfig {
+    pub fn display_name(&self, fallback: &str) -> String {
+        self.name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .unwrap_or(fallback)
+            .to_string()
+    }
 }
 
 fn default_user_agent() -> String {
@@ -72,7 +92,8 @@ pub async fn send_order(
     // Print curl command in test mode
     if test_mode {
         println!("[Danayan] Equivalent curl command:");
-        println!(r#"curl '{}' \
+        println!(
+            r#"curl '{}' \
   --compressed \
   -X POST \
   -H 'User-Agent: {}' \
@@ -90,7 +111,8 @@ pub async fn send_order(
   -H 'Pragma: no-cache' \
   -H 'Cache-Control: no-cache' \
   --data-raw '{}'"#,
-            config.order_url, config.user_agent, config.cookie, order_json);
+            config.order_url, config.user_agent, config.cookie, order_json
+        );
         println!();
 
         // If curl_only, don't send the request
@@ -101,10 +123,22 @@ pub async fn send_order(
 
     let mut headers = HeaderMap::new();
     headers.insert(USER_AGENT, HeaderValue::from_str(&config.user_agent)?);
-    headers.insert(ACCEPT, HeaderValue::from_static("application/json, text/plain, */*"));
-    headers.insert("Accept-Language", HeaderValue::from_static("en-US,en;q=0.5"));
-    headers.insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, deflate, br, zstd"));
-    headers.insert(ORIGIN, HeaderValue::from_static("https://trader.danayan.broker"));
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static("application/json, text/plain, */*"),
+    );
+    headers.insert(
+        "Accept-Language",
+        HeaderValue::from_static("en-US,en;q=0.5"),
+    );
+    headers.insert(
+        ACCEPT_ENCODING,
+        HeaderValue::from_static("gzip, deflate, br, zstd"),
+    );
+    headers.insert(
+        ORIGIN,
+        HeaderValue::from_static("https://trader.danayan.broker"),
+    );
     headers.insert("Connection", HeaderValue::from_static("keep-alive"));
     headers.insert(COOKIE, HeaderValue::from_str(&config.cookie)?);
     headers.insert("Sec-Fetch-Dest", HeaderValue::from_static("empty"));
@@ -121,11 +155,13 @@ pub async fn send_order(
     let body_bytes = order_json.as_bytes();
 
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert(CONTENT_LENGTH, HeaderValue::from_str(&body_bytes.len().to_string())?);
+    headers.insert(
+        CONTENT_LENGTH,
+        HeaderValue::from_str(&body_bytes.len().to_string())?,
+    );
 
-    println!("[Danayan] Sending order JSON: {}", order_json);
-
-    let response = client.post(&config.order_url)
+    let response = client
+        .post(&config.order_url)
         .headers(headers)
         .body(order_json)
         .send()
@@ -139,9 +175,6 @@ pub async fn send_order(
     } else {
         response_text.clone()
     };
-
-    println!("[Danayan] Order response status: {}", status);
-    println!("[Danayan] Order response body: {}", decoded_text);
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);

@@ -1,28 +1,33 @@
 {
-  "authorization": "PASTE_YOUR_BEARER_TOKEN_HERE",
-  "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
-  "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
-  "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
-  "batch_delay_ms": 100,
-  "batch_repeat": 1,
-  "target_time": "08:45:00.000",
-  "delay_model": "rtt",
-  "calibration": {
-    "enabled": true,
-    "probe_count": 10,
-    "probe_interval_ms": 300,
-    "warmup_probes": 2,
-    "safety_margin_ms": 0,
-    "estimator": "p50",
-    "max_acceptable_rtt_ms": 500
-  },
-  "orders": [
+  "accounts": [
     {
-      "type": "LIMIT",
-      "quantity": "1",
-      "isin": "IRO1RVND0001",
-      "validity": "DAY",
-      "price": "50340"
+      "name": "primary",
+      "authorization": "PASTE_YOUR_BEARER_TOKEN_HERE",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+      "order_url": "https://api.bidartrader.ir/trader/v1/order/buy",
+      "x_user_trace": "MjQ4MDMwMzYwODpJUk8xTk1BRDAwMDE=",
+      "batch_delay_ms": 100,
+      "batch_repeat": 1,
+      "target_time": "08:45:00.000",
+      "delay_model": "rtt",
+      "calibration": {
+        "enabled": true,
+        "probe_count": 10,
+        "probe_interval_ms": 300,
+        "warmup_probes": 2,
+        "safety_margin_ms": 0,
+        "estimator": "p50",
+        "max_acceptable_rtt_ms": 500
+      },
+      "orders": [
+        {
+          "type": "LIMIT",
+          "quantity": "1",
+          "isin": "IRO1RVND0001",
+          "validity": "DAY",
+          "price": "50340"
+        }
+      ]
     }
   ]
 }

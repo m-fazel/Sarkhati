@@ -28,6 +28,14 @@ pub struct ExirBrokersConfig {
     pub accounts: Vec<ExirBrokerConfig>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ExirBrokersConfigFile {
+    Single(ExirBrokerConfig),
+    Multiple { accounts: Vec<ExirBrokerConfig> },
+    List(Vec<ExirBrokerConfig>),
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ExirBrokerConfig {
     pub name: String,
@@ -75,9 +83,14 @@ pub struct ExirOrderData {
 pub fn load_config(path: &str) -> Result<ExirBrokersConfig> {
     let config_str =
         std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
-    let config: ExirBrokersConfig =
+    let config_file: ExirBrokersConfigFile =
         serde_json::from_str(&config_str).with_context(|| format!("Failed to parse {}", path))?;
-    Ok(config)
+    let accounts = match config_file {
+        ExirBrokersConfigFile::Single(config) => vec![config],
+        ExirBrokersConfigFile::Multiple { accounts } => accounts,
+        ExirBrokersConfigFile::List(accounts) => accounts,
+    };
+    Ok(ExirBrokersConfig { accounts })
 }
 
 pub fn find_broker<'a>(config: &'a ExirBrokersConfig, name: &str) -> Option<&'a ExirBrokerConfig> {

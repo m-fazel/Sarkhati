@@ -27,6 +27,14 @@ pub struct StandardBrokersConfig {
     pub accounts: Vec<StandardBrokerConfig>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum StandardBrokersConfigFile {
+    Single(StandardBrokerConfig),
+    Multiple { accounts: Vec<StandardBrokerConfig> },
+    List(Vec<StandardBrokerConfig>),
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct StandardBrokerConfig {
     pub name: String,
@@ -85,9 +93,14 @@ pub struct StandardOrderData {
 pub fn load_config(path: &str) -> Result<StandardBrokersConfig> {
     let config_str =
         std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
-    let config: StandardBrokersConfig =
+    let config_file: StandardBrokersConfigFile =
         serde_json::from_str(&config_str).with_context(|| format!("Failed to parse {}", path))?;
-    Ok(config)
+    let accounts = match config_file {
+        StandardBrokersConfigFile::Single(config) => vec![config],
+        StandardBrokersConfigFile::Multiple { accounts } => accounts,
+        StandardBrokersConfigFile::List(accounts) => accounts,
+    };
+    Ok(StandardBrokersConfig { accounts })
 }
 
 pub fn find_broker<'a>(

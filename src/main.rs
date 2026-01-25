@@ -243,8 +243,6 @@ async fn run_standard_broker(
                 );
             }
 
-            let mut last_wall_epoch_ms = now_epoch_ms;
-
             if calibration_enabled {
                 let calibration = broker
                     .calibration
@@ -276,7 +274,6 @@ async fn run_standard_broker(
                         "Too late to calibrate before target_time; start earlier or reduce probes"
                     );
                 }
-                last_wall_epoch_ms = now_epoch_ms;
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
@@ -348,70 +345,38 @@ async fn run_standard_broker(
                 ),
             );
 
-            for repeat_index in 0..broker.batch_repeat {
-                let scheduled_epoch_ms =
-                    final_send_epoch_ms + repeat_index as i64 * broker.batch_delay_ms as i64;
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > scheduled_epoch_ms {
-                    log_warn(
-                        &broker.name,
-                        &format!(
-                            "Scheduled send time passed by {}ms for batch #{}",
-                            now_epoch_ms - scheduled_epoch_ms,
-                            repeat_index + 1
-                        ),
-                    );
-                }
-                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
-
-                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-                let actual_epoch_us = current_epoch_micros()?;
-                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                log_info(
-                    &broker.name,
-                    &format!(
-                        "Sending scheduled batch #{} at {} (drift {}µs, epoch_us={})",
-                        repeat_index + 1,
-                        actual_send_time.format("%H:%M:%S%.3f"),
-                        drift_micros,
-                        actual_epoch_us
-                    ),
-                );
-
-                for (order_index, order) in broker.orders.iter().enumerate() {
-                    let order_json = serde_json::to_string(order)?;
-                    match standard_broker::send_order(
-                        &broker,
-                        &order_json,
+            let total_orders = broker.orders.len();
+            let mut handles = Vec::new();
+            for (order_index, order) in broker.orders.iter().enumerate() {
+                let broker_clone = broker.clone();
+                let order_json = serde_json::to_string(order)?;
+                let broker_name = broker.name.clone();
+                let limiter =
+                    std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+                let handle = tokio::spawn(async move {
+                    if let Err(e) = run_standard_order_schedule(
+                        broker_clone,
+                        order_json,
+                        order_index,
+                        total_orders,
+                        final_send_epoch_ms,
                         test_mode,
                         curl_only,
-                        Some(rate_limiter.as_ref()),
+                        limiter,
                     )
                     .await
                     {
-                        Ok(_) => log_success(
-                            &broker.name,
-                            &format!(
-                                "Batch {}/{} Order {}/{} sent",
-                                repeat_index + 1,
-                                broker.batch_repeat,
-                                order_index + 1,
-                                broker.orders.len()
-                            ),
-                        ),
-                        Err(e) => log_error(
-                            &broker.name,
-                            &format!(
-                                "Batch {}/{} Order {}/{} failed: {}",
-                                repeat_index + 1,
-                                broker.batch_repeat,
-                                order_index + 1,
-                                broker.orders.len(),
-                                e
-                            ),
-                        ),
+                        log_error(
+                            &broker_name,
+                            &format!("Order thread {} stopped: {}", order_index + 1, e),
+                        );
                     }
-                }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                let _ = handle.await;
             }
 
             if test_mode {
@@ -434,53 +399,39 @@ async fn run_standard_broker(
     );
     log_info(&broker.name, "Starting continuous order sending...");
 
-    loop {
-        for repeat_index in 0..broker.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(broker.batch_delay_ms)).await;
+    let total_orders = broker.orders.len();
+    let mut handles = Vec::new();
+    for (order_index, order) in broker.orders.iter().enumerate() {
+        let broker_clone = broker.clone();
+        let order_json = serde_json::to_string(order)?;
+        let broker_name = broker.name.clone();
+        let limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_standard_order_continuous(
+                broker_clone,
+                order_json,
+                order_index,
+                total_orders,
+                test_mode,
+                curl_only,
+                limiter,
+            )
+            .await
+            {
+                log_error(
+                    &broker_name,
+                    &format!("Order thread {} stopped: {}", order_index + 1, e),
+                );
             }
-
-            for (order_index, order) in broker.orders.iter().enumerate() {
-                let order_json = serde_json::to_string(order)?;
-                match standard_broker::send_order(
-                    &broker,
-                    &order_json,
-                    test_mode,
-                    curl_only,
-                    Some(rate_limiter.as_ref()),
-                )
-                .await
-                {
-                    Ok(_) => log_success(
-                        &broker.name,
-                        &format!(
-                            "Batch {}/{} Order {}/{} sent",
-                            repeat_index + 1,
-                            broker.batch_repeat,
-                            order_index + 1,
-                            broker.orders.len()
-                        ),
-                    ),
-                    Err(e) => log_error(
-                        &broker.name,
-                        &format!(
-                            "Batch {}/{} Order {}/{} failed: {}",
-                            repeat_index + 1,
-                            broker.batch_repeat,
-                            order_index + 1,
-                            broker.orders.len(),
-                            e
-                        ),
-                    ),
-                }
-            }
-
-            if test_mode {
-                log_info(&broker.name, "Test mode: exiting after one batch cycle");
-                return Ok(());
-            }
-        }
+        });
+        handles.push(handle);
     }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
 }
 
 async fn run_exir_broker(
@@ -569,8 +520,6 @@ async fn run_exir_broker(
                 );
             }
 
-            let mut last_wall_epoch_ms = now_epoch_ms;
-
             if calibration_enabled {
                 let calibration = broker
                     .calibration
@@ -602,7 +551,6 @@ async fn run_exir_broker(
                         "Too late to calibrate before target_time; start earlier or reduce probes"
                     );
                 }
-                last_wall_epoch_ms = now_epoch_ms;
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
@@ -674,70 +622,38 @@ async fn run_exir_broker(
                 ),
             );
 
-            for repeat_index in 0..broker.batch_repeat {
-                let scheduled_epoch_ms =
-                    final_send_epoch_ms + repeat_index as i64 * broker.batch_delay_ms as i64;
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > scheduled_epoch_ms {
-                    log_warn(
-                        &broker.name,
-                        &format!(
-                            "Scheduled send time passed by {}ms for batch #{}",
-                            now_epoch_ms - scheduled_epoch_ms,
-                            repeat_index + 1
-                        ),
-                    );
-                }
-                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
-
-                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-                let actual_epoch_us = current_epoch_micros()?;
-                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                log_info(
-                    &broker.name,
-                    &format!(
-                        "Sending scheduled batch #{} at {} (drift {}µs, epoch_us={})",
-                        repeat_index + 1,
-                        actual_send_time.format("%H:%M:%S%.3f"),
-                        drift_micros,
-                        actual_epoch_us
-                    ),
-                );
-
-                for (order_index, order) in broker.orders.iter().enumerate() {
-                    let order_json = serde_json::to_string(order)?;
-                    match exir_broker::send_order(
-                        &broker,
-                        &order_json,
+            let total_orders = broker.orders.len();
+            let mut handles = Vec::new();
+            for (order_index, order) in broker.orders.iter().enumerate() {
+                let broker_clone = broker.clone();
+                let order_json = serde_json::to_string(order)?;
+                let broker_name = broker.name.clone();
+                let limiter =
+                    std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+                let handle = tokio::spawn(async move {
+                    if let Err(e) = run_exir_order_schedule(
+                        broker_clone,
+                        order_json,
+                        order_index,
+                        total_orders,
+                        final_send_epoch_ms,
                         test_mode,
                         curl_only,
-                        Some(rate_limiter.as_ref()),
+                        limiter,
                     )
                     .await
                     {
-                        Ok(_) => log_success(
-                            &broker.name,
-                            &format!(
-                                "Batch {}/{} Order {}/{} sent",
-                                repeat_index + 1,
-                                broker.batch_repeat,
-                                order_index + 1,
-                                broker.orders.len()
-                            ),
-                        ),
-                        Err(e) => log_error(
-                            &broker.name,
-                            &format!(
-                                "Batch {}/{} Order {}/{} failed: {}",
-                                repeat_index + 1,
-                                broker.batch_repeat,
-                                order_index + 1,
-                                broker.orders.len(),
-                                e
-                            ),
-                        ),
+                        log_error(
+                            &broker_name,
+                            &format!("Order thread {} stopped: {}", order_index + 1, e),
+                        );
                     }
-                }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                let _ = handle.await;
             }
 
             if test_mode {
@@ -760,53 +676,39 @@ async fn run_exir_broker(
     );
     log_info(&broker.name, "Starting continuous order sending...");
 
-    loop {
-        for repeat_index in 0..broker.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(broker.batch_delay_ms)).await;
+    let total_orders = broker.orders.len();
+    let mut handles = Vec::new();
+    for (order_index, order) in broker.orders.iter().enumerate() {
+        let broker_clone = broker.clone();
+        let order_json = serde_json::to_string(order)?;
+        let broker_name = broker.name.clone();
+        let limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_exir_order_continuous(
+                broker_clone,
+                order_json,
+                order_index,
+                total_orders,
+                test_mode,
+                curl_only,
+                limiter,
+            )
+            .await
+            {
+                log_error(
+                    &broker_name,
+                    &format!("Order thread {} stopped: {}", order_index + 1, e),
+                );
             }
-
-            for (order_index, order) in broker.orders.iter().enumerate() {
-                let order_json = serde_json::to_string(order)?;
-                match exir_broker::send_order(
-                    &broker,
-                    &order_json,
-                    test_mode,
-                    curl_only,
-                    Some(rate_limiter.as_ref()),
-                )
-                .await
-                {
-                    Ok(_) => log_success(
-                        &broker.name,
-                        &format!(
-                            "Batch {}/{} Order {}/{} sent",
-                            repeat_index + 1,
-                            broker.batch_repeat,
-                            order_index + 1,
-                            broker.orders.len()
-                        ),
-                    ),
-                    Err(e) => log_error(
-                        &broker.name,
-                        &format!(
-                            "Batch {}/{} Order {}/{} failed: {}",
-                            repeat_index + 1,
-                            broker.batch_repeat,
-                            order_index + 1,
-                            broker.orders.len(),
-                            e
-                        ),
-                    ),
-                }
-            }
-
-            if test_mode {
-                log_info(&broker.name, "Test mode: exiting after one batch cycle");
-                return Ok(());
-            }
-        }
+        });
+        handles.push(handle);
     }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
 }
 
 async fn run_mofid_account(
@@ -905,8 +807,6 @@ async fn run_mofid_account(
                 );
             }
 
-            let mut last_wall_epoch_ms = now_epoch_ms;
-
             if calibration_enabled {
                 let calibration = config
                     .calibration
@@ -938,7 +838,6 @@ async fn run_mofid_account(
                         "Too late to calibrate before target_time; start earlier or reduce probes"
                     );
                 }
-                last_wall_epoch_ms = now_epoch_ms;
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
@@ -1006,69 +905,39 @@ async fn run_mofid_account(
                 ),
             );
 
-            for repeat_index in 0..config.batch_repeat {
-                let scheduled_epoch_ms =
-                    final_send_epoch_ms + repeat_index as i64 * config.batch_delay_ms as i64;
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > scheduled_epoch_ms {
-                    log_warn(
-                        &label,
-                        &format!(
-                            "Scheduled send time passed by {}ms for batch #{}",
-                            now_epoch_ms - scheduled_epoch_ms,
-                            repeat_index + 1
-                        ),
-                    );
-                }
-                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
-
-                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-                let actual_epoch_us = current_epoch_micros()?;
-                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                log_info(
-                    &label,
-                    &format!(
-                        "Sending scheduled batch #{} at {} (drift {}µs, epoch_us={})",
-                        repeat_index + 1,
-                        actual_send_time.format("%H:%M:%S%.3f"),
-                        drift_micros,
-                        actual_epoch_us
-                    ),
-                );
-
-                for (order_index, order) in config.orders.iter().enumerate() {
-                    match mofid::send_order(
-                        &config,
-                        order,
+            let total_orders = config.orders.len();
+            let mut handles = Vec::new();
+            for (order_index, order) in config.orders.iter().enumerate() {
+                let config_clone = config.clone();
+                let order_clone = order.clone();
+                let label_clone = label.clone();
+                let limiter =
+                    std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+                let handle = tokio::spawn(async move {
+                    if let Err(e) = run_mofid_order_schedule(
+                        config_clone,
+                        order_clone,
+                        label_clone.clone(),
+                        order_index,
+                        total_orders,
+                        final_send_epoch_ms,
                         test_mode,
                         curl_only,
-                        Some(rate_limiter.as_ref()),
+                        limiter,
                     )
                     .await
                     {
-                        Ok(_) => log_success(
-                            &label,
-                            &format!(
-                                "Batch {}/{} Order {}/{} sent",
-                                repeat_index + 1,
-                                config.batch_repeat,
-                                order_index + 1,
-                                config.orders.len()
-                            ),
-                        ),
-                        Err(e) => log_error(
-                            &label,
-                            &format!(
-                                "Batch {}/{} Order {}/{} failed: {}",
-                                repeat_index + 1,
-                                config.batch_repeat,
-                                order_index + 1,
-                                config.orders.len(),
-                                e
-                            ),
-                        ),
+                        log_error(
+                            &label_clone,
+                            &format!("Order thread {} stopped: {}", order_index + 1, e),
+                        );
                     }
-                }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                let _ = handle.await;
             }
 
             if test_mode {
@@ -1088,52 +957,40 @@ async fn run_mofid_account(
     );
     log_info(&label, "Starting continuous order sending...");
 
-    loop {
-        for repeat_index in 0..config.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(config.batch_delay_ms)).await;
+    let total_orders = config.orders.len();
+    let mut handles = Vec::new();
+    for (order_index, order) in config.orders.iter().enumerate() {
+        let config_clone = config.clone();
+        let order_clone = order.clone();
+        let label_clone = label.clone();
+        let limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_mofid_order_continuous(
+                config_clone,
+                order_clone,
+                label_clone.clone(),
+                order_index,
+                total_orders,
+                test_mode,
+                curl_only,
+                limiter,
+            )
+            .await
+            {
+                log_error(
+                    &label_clone,
+                    &format!("Order thread {} stopped: {}", order_index + 1, e),
+                );
             }
-
-            for (order_index, order) in config.orders.iter().enumerate() {
-                match mofid::send_order(
-                    &config,
-                    order,
-                    test_mode,
-                    curl_only,
-                    Some(rate_limiter.as_ref()),
-                )
-                .await
-                {
-                    Ok(_) => log_success(
-                        &label,
-                        &format!(
-                            "Batch {}/{} Order {}/{} sent",
-                            repeat_index + 1,
-                            config.batch_repeat,
-                            order_index + 1,
-                            config.orders.len()
-                        ),
-                    ),
-                    Err(e) => log_error(
-                        &label,
-                        &format!(
-                            "Batch {}/{} Order {}/{} failed: {}",
-                            repeat_index + 1,
-                            config.batch_repeat,
-                            order_index + 1,
-                            config.orders.len(),
-                            e
-                        ),
-                    ),
-                }
-            }
-
-            if test_mode {
-                log_info(&label, "Test mode: exiting after one batch cycle");
-                return Ok(());
-            }
-        }
+        });
+        handles.push(handle);
     }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
 }
 
 async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
@@ -1228,8 +1085,6 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                 );
             }
 
-            let mut last_wall_epoch_ms = now_epoch_ms;
-
             if calibration_enabled {
                 let calibration = config
                     .calibration
@@ -1261,7 +1116,6 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                         "Too late to calibrate before target_time; start earlier or reduce probes"
                     );
                 }
-                last_wall_epoch_ms = now_epoch_ms;
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
@@ -1533,8 +1387,6 @@ async fn run_danayan_account(
                 );
             }
 
-            let mut last_wall_epoch_ms = now_epoch_ms;
-
             if calibration_enabled {
                 let calibration = config
                     .calibration
@@ -1566,7 +1418,6 @@ async fn run_danayan_account(
                         "Too late to calibrate before target_time; start earlier or reduce probes"
                     );
                 }
-                last_wall_epoch_ms = now_epoch_ms;
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
@@ -1634,69 +1485,39 @@ async fn run_danayan_account(
                 ),
             );
 
-            for repeat_index in 0..config.batch_repeat {
-                let scheduled_epoch_ms =
-                    final_send_epoch_ms + repeat_index as i64 * config.batch_delay_ms as i64;
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > scheduled_epoch_ms {
-                    log_warn(
-                        &label,
-                        &format!(
-                            "Scheduled send time passed by {}ms for batch #{}",
-                            now_epoch_ms - scheduled_epoch_ms,
-                            repeat_index + 1
-                        ),
-                    );
-                }
-                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
-
-                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-                let actual_epoch_us = current_epoch_micros()?;
-                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                log_info(
-                    &label,
-                    &format!(
-                        "Sending scheduled batch #{} at {} (drift {}µs, epoch_us={})",
-                        repeat_index + 1,
-                        actual_send_time.format("%H:%M:%S%.3f"),
-                        drift_micros,
-                        actual_epoch_us
-                    ),
-                );
-
-                for (order_index, order) in config.orders.iter().enumerate() {
-                    match danayan::send_order(
-                        &config,
-                        order,
+            let total_orders = config.orders.len();
+            let mut handles = Vec::new();
+            for (order_index, order) in config.orders.iter().enumerate() {
+                let config_clone = config.clone();
+                let order_clone = order.clone();
+                let label_clone = label.clone();
+                let limiter =
+                    std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+                let handle = tokio::spawn(async move {
+                    if let Err(e) = run_danayan_order_schedule(
+                        config_clone,
+                        order_clone,
+                        label_clone.clone(),
+                        order_index,
+                        total_orders,
+                        final_send_epoch_ms,
                         test_mode,
                         curl_only,
-                        Some(rate_limiter.as_ref()),
+                        limiter,
                     )
                     .await
                     {
-                        Ok(_) => log_success(
-                            &label,
-                            &format!(
-                                "Batch {}/{} Order {}/{} sent",
-                                repeat_index + 1,
-                                config.batch_repeat,
-                                order_index + 1,
-                                config.orders.len()
-                            ),
-                        ),
-                        Err(e) => log_error(
-                            &label,
-                            &format!(
-                                "Batch {}/{} Order {}/{} failed: {}",
-                                repeat_index + 1,
-                                config.batch_repeat,
-                                order_index + 1,
-                                config.orders.len(),
-                                e
-                            ),
-                        ),
+                        log_error(
+                            &label_clone,
+                            &format!("Order thread {} stopped: {}", order_index + 1, e),
+                        );
                     }
-                }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                let _ = handle.await;
             }
 
             if test_mode {
@@ -1716,52 +1537,40 @@ async fn run_danayan_account(
     );
     log_info(&label, "Starting continuous order sending...");
 
-    loop {
-        for repeat_index in 0..config.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(config.batch_delay_ms)).await;
+    let total_orders = config.orders.len();
+    let mut handles = Vec::new();
+    for (order_index, order) in config.orders.iter().enumerate() {
+        let config_clone = config.clone();
+        let order_clone = order.clone();
+        let label_clone = label.clone();
+        let limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_danayan_order_continuous(
+                config_clone,
+                order_clone,
+                label_clone.clone(),
+                order_index,
+                total_orders,
+                test_mode,
+                curl_only,
+                limiter,
+            )
+            .await
+            {
+                log_error(
+                    &label_clone,
+                    &format!("Order thread {} stopped: {}", order_index + 1, e),
+                );
             }
-
-            for (order_index, order) in config.orders.iter().enumerate() {
-                match danayan::send_order(
-                    &config,
-                    order,
-                    test_mode,
-                    curl_only,
-                    Some(rate_limiter.as_ref()),
-                )
-                .await
-                {
-                    Ok(_) => log_success(
-                        &label,
-                        &format!(
-                            "Batch {}/{} Order {}/{} sent",
-                            repeat_index + 1,
-                            config.batch_repeat,
-                            order_index + 1,
-                            config.orders.len()
-                        ),
-                    ),
-                    Err(e) => log_error(
-                        &label,
-                        &format!(
-                            "Batch {}/{} Order {}/{} failed: {}",
-                            repeat_index + 1,
-                            config.batch_repeat,
-                            order_index + 1,
-                            config.orders.len(),
-                            e
-                        ),
-                    ),
-                }
-            }
-
-            if test_mode {
-                log_info(&label, "Test mode: exiting after one batch cycle");
-                return Ok(());
-            }
-        }
+        });
+        handles.push(handle);
     }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
 }
 
 async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
@@ -1866,8 +1675,6 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                 );
             }
 
-            let mut last_wall_epoch_ms = now_epoch_ms;
-
             if calibration_enabled {
                 let calibration = config
                     .calibration
@@ -1899,7 +1706,6 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                         "Too late to calibrate before target_time; start earlier or reduce probes"
                     );
                 }
-                last_wall_epoch_ms = now_epoch_ms;
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
@@ -2147,8 +1953,6 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                 );
             }
 
-            let mut last_wall_epoch_ms = now_epoch_ms;
-
             if calibration_enabled {
                 let calibration = config
                     .calibration
@@ -2180,7 +1984,6 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                         "Too late to calibrate before target_time; start earlier or reduce probes"
                     );
                 }
-                last_wall_epoch_ms = now_epoch_ms;
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
@@ -2456,8 +2259,6 @@ async fn run_bidar_account(
                 );
             }
 
-            let mut last_wall_epoch_ms = now_epoch_ms;
-
             if calibration_enabled {
                 let calibration = config
                     .calibration
@@ -2492,7 +2293,6 @@ async fn run_bidar_account(
                         "Too late to calibrate before target_time; start earlier or reduce probes"
                     );
                 }
-                last_wall_epoch_ms = now_epoch_ms;
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
@@ -2574,69 +2374,39 @@ async fn run_bidar_account(
                 ),
             );
 
-            for repeat_index in 0..config.batch_repeat {
-                let scheduled_epoch_ms =
-                    final_send_epoch_ms + repeat_index as i64 * config.batch_delay_ms as i64;
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > scheduled_epoch_ms {
-                    log_warn(
-                        &label,
-                        &format!(
-                            "Scheduled send time passed by {}ms for batch #{}",
-                            now_epoch_ms - scheduled_epoch_ms,
-                            repeat_index + 1
-                        ),
-                    );
-                }
-                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
-
-                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-                let actual_epoch_us = current_epoch_micros()?;
-                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                log_info(
-                    &label,
-                    &format!(
-                        "Sending scheduled batch #{} at {} (drift {}µs, epoch_us={})",
-                        repeat_index + 1,
-                        actual_send_time.format("%H:%M:%S%.3f"),
-                        drift_micros,
-                        actual_epoch_us
-                    ),
-                );
-
-                for (order_index, order) in config.orders.iter().enumerate() {
-                    match bidar::send_order(
-                        &config,
-                        order,
+            let total_orders = config.orders.len();
+            let mut handles = Vec::new();
+            for (order_index, order) in config.orders.iter().enumerate() {
+                let config_clone = config.clone();
+                let order_clone = order.clone();
+                let label_clone = label.clone();
+                let limiter =
+                    std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+                let handle = tokio::spawn(async move {
+                    if let Err(e) = run_bidar_order_schedule(
+                        config_clone,
+                        order_clone,
+                        label_clone.clone(),
+                        order_index,
+                        total_orders,
+                        final_send_epoch_ms,
                         test_mode,
                         curl_only,
-                        Some(rate_limiter.as_ref()),
+                        limiter,
                     )
                     .await
                     {
-                        Ok(_) => log_success(
-                            &label,
-                            &format!(
-                                "Batch {}/{} Order {}/{} sent",
-                                repeat_index + 1,
-                                config.batch_repeat,
-                                order_index + 1,
-                                config.orders.len()
-                            ),
-                        ),
-                        Err(e) => log_error(
-                            &label,
-                            &format!(
-                                "Batch {}/{} Order {}/{} failed: {}",
-                                repeat_index + 1,
-                                config.batch_repeat,
-                                order_index + 1,
-                                config.orders.len(),
-                                e
-                            ),
-                        ),
+                        log_error(
+                            &label_clone,
+                            &format!("Order thread {} stopped: {}", order_index + 1, e),
+                        );
                     }
-                }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                let _ = handle.await;
             }
 
             if test_mode {
@@ -2656,52 +2426,40 @@ async fn run_bidar_account(
     );
     log_info(&label, "Starting continuous order sending...");
 
-    loop {
-        for repeat_index in 0..config.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(tokio::time::Duration::from_millis(config.batch_delay_ms)).await;
+    let total_orders = config.orders.len();
+    let mut handles = Vec::new();
+    for (order_index, order) in config.orders.iter().enumerate() {
+        let config_clone = config.clone();
+        let order_clone = order.clone();
+        let label_clone = label.clone();
+        let limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_bidar_order_continuous(
+                config_clone,
+                order_clone,
+                label_clone.clone(),
+                order_index,
+                total_orders,
+                test_mode,
+                curl_only,
+                limiter,
+            )
+            .await
+            {
+                log_error(
+                    &label_clone,
+                    &format!("Order thread {} stopped: {}", order_index + 1, e),
+                );
             }
-
-            for (order_index, order) in config.orders.iter().enumerate() {
-                match bidar::send_order(
-                    &config,
-                    order,
-                    test_mode,
-                    curl_only,
-                    Some(rate_limiter.as_ref()),
-                )
-                .await
-                {
-                    Ok(_) => log_success(
-                        &label,
-                        &format!(
-                            "Batch {}/{} Order {}/{} sent",
-                            repeat_index + 1,
-                            config.batch_repeat,
-                            order_index + 1,
-                            config.orders.len()
-                        ),
-                    ),
-                    Err(e) => log_error(
-                        &label,
-                        &format!(
-                            "Batch {}/{} Order {}/{} failed: {}",
-                            repeat_index + 1,
-                            config.batch_repeat,
-                            order_index + 1,
-                            config.orders.len(),
-                            e
-                        ),
-                    ),
-                }
-            }
-
-            if test_mode {
-                log_info(&label, "Test mode: exiting after one batch cycle");
-                return Ok(());
-            }
-        }
+        });
+        handles.push(handle);
     }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
 }
 
 async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
@@ -2740,6 +2498,687 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn run_standard_order_schedule(
+    broker: standard_broker::StandardBrokerConfig,
+    order_json: String,
+    order_index: usize,
+    total_orders: usize,
+    final_send_epoch_ms: i64,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    let mut last_wall_epoch_ms = current_epoch_millis()?;
+    for repeat_index in 0..broker.batch_repeat {
+        let scheduled_epoch_ms =
+            final_send_epoch_ms + repeat_index as i64 * broker.batch_delay_ms as i64;
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms > scheduled_epoch_ms {
+            log_warn(
+                &broker.name,
+                &format!(
+                    "Order {}/{} scheduled send time passed by {}ms for batch #{}",
+                    order_index + 1,
+                    total_orders,
+                    now_epoch_ms - scheduled_epoch_ms,
+                    repeat_index + 1
+                ),
+            );
+        }
+        wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_epoch_us = current_epoch_micros()?;
+        let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+        log_info(
+            &broker.name,
+            &format!(
+                "Sending scheduled batch #{} order {}/{} at {} (drift {}µs, epoch_us={})",
+                repeat_index + 1,
+                order_index + 1,
+                total_orders,
+                actual_send_time.format("%H:%M:%S%.3f"),
+                drift_micros,
+                actual_epoch_us
+            ),
+        );
+
+        match standard_broker::send_order(
+            &broker,
+            &order_json,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        {
+            Ok(_) => log_success(
+                &broker.name,
+                &format!(
+                    "Batch {}/{} Order {}/{} sent",
+                    repeat_index + 1,
+                    broker.batch_repeat,
+                    order_index + 1,
+                    total_orders
+                ),
+            ),
+            Err(e) => log_error(
+                &broker.name,
+                &format!(
+                    "Batch {}/{} Order {}/{} failed: {}",
+                    repeat_index + 1,
+                    broker.batch_repeat,
+                    order_index + 1,
+                    total_orders,
+                    e
+                ),
+            ),
+        }
+    }
+    Ok(())
+}
+
+async fn run_standard_order_continuous(
+    broker: standard_broker::StandardBrokerConfig,
+    order_json: String,
+    order_index: usize,
+    total_orders: usize,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    loop {
+        for repeat_index in 0..broker.batch_repeat {
+            if repeat_index > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(broker.batch_delay_ms)).await;
+            }
+
+            match standard_broker::send_order(
+                &broker,
+                &order_json,
+                test_mode,
+                curl_only,
+                Some(rate_limiter.as_ref()),
+            )
+            .await
+            {
+                Ok(_) => log_success(
+                    &broker.name,
+                    &format!(
+                        "Batch {}/{} Order {}/{} sent",
+                        repeat_index + 1,
+                        broker.batch_repeat,
+                        order_index + 1,
+                        total_orders
+                    ),
+                ),
+                Err(e) => log_error(
+                    &broker.name,
+                    &format!(
+                        "Batch {}/{} Order {}/{} failed: {}",
+                        repeat_index + 1,
+                        broker.batch_repeat,
+                        order_index + 1,
+                        total_orders,
+                        e
+                    ),
+                ),
+            }
+
+            if test_mode {
+                log_info(&broker.name, "Test mode: exiting after one batch cycle");
+                return Ok(());
+            }
+        }
+    }
+}
+
+async fn run_exir_order_schedule(
+    broker: exir_broker::ExirBrokerConfig,
+    order_json: String,
+    order_index: usize,
+    total_orders: usize,
+    final_send_epoch_ms: i64,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    let mut last_wall_epoch_ms = current_epoch_millis()?;
+    for repeat_index in 0..broker.batch_repeat {
+        let scheduled_epoch_ms =
+            final_send_epoch_ms + repeat_index as i64 * broker.batch_delay_ms as i64;
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms > scheduled_epoch_ms {
+            log_warn(
+                &broker.name,
+                &format!(
+                    "Order {}/{} scheduled send time passed by {}ms for batch #{}",
+                    order_index + 1,
+                    total_orders,
+                    now_epoch_ms - scheduled_epoch_ms,
+                    repeat_index + 1
+                ),
+            );
+        }
+        wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_epoch_us = current_epoch_micros()?;
+        let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+        log_info(
+            &broker.name,
+            &format!(
+                "Sending scheduled batch #{} order {}/{} at {} (drift {}µs, epoch_us={})",
+                repeat_index + 1,
+                order_index + 1,
+                total_orders,
+                actual_send_time.format("%H:%M:%S%.3f"),
+                drift_micros,
+                actual_epoch_us
+            ),
+        );
+
+        match exir_broker::send_order(
+            &broker,
+            &order_json,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        {
+            Ok(_) => log_success(
+                &broker.name,
+                &format!(
+                    "Batch {}/{} Order {}/{} sent",
+                    repeat_index + 1,
+                    broker.batch_repeat,
+                    order_index + 1,
+                    total_orders
+                ),
+            ),
+            Err(e) => log_error(
+                &broker.name,
+                &format!(
+                    "Batch {}/{} Order {}/{} failed: {}",
+                    repeat_index + 1,
+                    broker.batch_repeat,
+                    order_index + 1,
+                    total_orders,
+                    e
+                ),
+            ),
+        }
+    }
+    Ok(())
+}
+
+async fn run_exir_order_continuous(
+    broker: exir_broker::ExirBrokerConfig,
+    order_json: String,
+    order_index: usize,
+    total_orders: usize,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    loop {
+        for repeat_index in 0..broker.batch_repeat {
+            if repeat_index > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(broker.batch_delay_ms)).await;
+            }
+
+            match exir_broker::send_order(
+                &broker,
+                &order_json,
+                test_mode,
+                curl_only,
+                Some(rate_limiter.as_ref()),
+            )
+            .await
+            {
+                Ok(_) => log_success(
+                    &broker.name,
+                    &format!(
+                        "Batch {}/{} Order {}/{} sent",
+                        repeat_index + 1,
+                        broker.batch_repeat,
+                        order_index + 1,
+                        total_orders
+                    ),
+                ),
+                Err(e) => log_error(
+                    &broker.name,
+                    &format!(
+                        "Batch {}/{} Order {}/{} failed: {}",
+                        repeat_index + 1,
+                        broker.batch_repeat,
+                        order_index + 1,
+                        total_orders,
+                        e
+                    ),
+                ),
+            }
+
+            if test_mode {
+                log_info(&broker.name, "Test mode: exiting after one batch cycle");
+                return Ok(());
+            }
+        }
+    }
+}
+
+async fn run_mofid_order_schedule(
+    config: mofid::MofidConfig,
+    order: mofid::MofidOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    final_send_epoch_ms: i64,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    let mut last_wall_epoch_ms = current_epoch_millis()?;
+    for repeat_index in 0..config.batch_repeat {
+        let scheduled_epoch_ms =
+            final_send_epoch_ms + repeat_index as i64 * config.batch_delay_ms as i64;
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms > scheduled_epoch_ms {
+            log_warn(
+                &label,
+                &format!(
+                    "Order {}/{} scheduled send time passed by {}ms for batch #{}",
+                    order_index + 1,
+                    total_orders,
+                    now_epoch_ms - scheduled_epoch_ms,
+                    repeat_index + 1
+                ),
+            );
+        }
+        wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_epoch_us = current_epoch_micros()?;
+        let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+        log_info(
+            &label,
+            &format!(
+                "Sending scheduled batch #{} order {}/{} at {} (drift {}µs, epoch_us={})",
+                repeat_index + 1,
+                order_index + 1,
+                total_orders,
+                actual_send_time.format("%H:%M:%S%.3f"),
+                drift_micros,
+                actual_epoch_us
+            ),
+        );
+
+        match mofid::send_order(
+            &config,
+            &order,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        {
+            Ok(_) => log_success(
+                &label,
+                &format!(
+                    "Batch {}/{} Order {}/{} sent",
+                    repeat_index + 1,
+                    config.batch_repeat,
+                    order_index + 1,
+                    total_orders
+                ),
+            ),
+            Err(e) => log_error(
+                &label,
+                &format!(
+                    "Batch {}/{} Order {}/{} failed: {}",
+                    repeat_index + 1,
+                    config.batch_repeat,
+                    order_index + 1,
+                    total_orders,
+                    e
+                ),
+            ),
+        }
+    }
+    Ok(())
+}
+
+async fn run_mofid_order_continuous(
+    config: mofid::MofidConfig,
+    order: mofid::MofidOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    loop {
+        for repeat_index in 0..config.batch_repeat {
+            if repeat_index > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(config.batch_delay_ms)).await;
+            }
+
+            match mofid::send_order(
+                &config,
+                &order,
+                test_mode,
+                curl_only,
+                Some(rate_limiter.as_ref()),
+            )
+            .await
+            {
+                Ok(_) => log_success(
+                    &label,
+                    &format!(
+                        "Batch {}/{} Order {}/{} sent",
+                        repeat_index + 1,
+                        config.batch_repeat,
+                        order_index + 1,
+                        total_orders
+                    ),
+                ),
+                Err(e) => log_error(
+                    &label,
+                    &format!(
+                        "Batch {}/{} Order {}/{} failed: {}",
+                        repeat_index + 1,
+                        config.batch_repeat,
+                        order_index + 1,
+                        total_orders,
+                        e
+                    ),
+                ),
+            }
+
+            if test_mode {
+                log_info(&label, "Test mode: exiting after one batch cycle");
+                return Ok(());
+            }
+        }
+    }
+}
+
+async fn run_danayan_order_schedule(
+    config: danayan::DanayanConfig,
+    order: danayan::DanayanOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    final_send_epoch_ms: i64,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    let mut last_wall_epoch_ms = current_epoch_millis()?;
+    for repeat_index in 0..config.batch_repeat {
+        let scheduled_epoch_ms =
+            final_send_epoch_ms + repeat_index as i64 * config.batch_delay_ms as i64;
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms > scheduled_epoch_ms {
+            log_warn(
+                &label,
+                &format!(
+                    "Order {}/{} scheduled send time passed by {}ms for batch #{}",
+                    order_index + 1,
+                    total_orders,
+                    now_epoch_ms - scheduled_epoch_ms,
+                    repeat_index + 1
+                ),
+            );
+        }
+        wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_epoch_us = current_epoch_micros()?;
+        let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+        log_info(
+            &label,
+            &format!(
+                "Sending scheduled batch #{} order {}/{} at {} (drift {}µs, epoch_us={})",
+                repeat_index + 1,
+                order_index + 1,
+                total_orders,
+                actual_send_time.format("%H:%M:%S%.3f"),
+                drift_micros,
+                actual_epoch_us
+            ),
+        );
+
+        match danayan::send_order(
+            &config,
+            &order,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        {
+            Ok(_) => log_success(
+                &label,
+                &format!(
+                    "Batch {}/{} Order {}/{} sent",
+                    repeat_index + 1,
+                    config.batch_repeat,
+                    order_index + 1,
+                    total_orders
+                ),
+            ),
+            Err(e) => log_error(
+                &label,
+                &format!(
+                    "Batch {}/{} Order {}/{} failed: {}",
+                    repeat_index + 1,
+                    config.batch_repeat,
+                    order_index + 1,
+                    total_orders,
+                    e
+                ),
+            ),
+        }
+    }
+    Ok(())
+}
+
+async fn run_danayan_order_continuous(
+    config: danayan::DanayanConfig,
+    order: danayan::DanayanOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    loop {
+        for repeat_index in 0..config.batch_repeat {
+            if repeat_index > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(config.batch_delay_ms)).await;
+            }
+
+            match danayan::send_order(
+                &config,
+                &order,
+                test_mode,
+                curl_only,
+                Some(rate_limiter.as_ref()),
+            )
+            .await
+            {
+                Ok(_) => log_success(
+                    &label,
+                    &format!(
+                        "Batch {}/{} Order {}/{} sent",
+                        repeat_index + 1,
+                        config.batch_repeat,
+                        order_index + 1,
+                        total_orders
+                    ),
+                ),
+                Err(e) => log_error(
+                    &label,
+                    &format!(
+                        "Batch {}/{} Order {}/{} failed: {}",
+                        repeat_index + 1,
+                        config.batch_repeat,
+                        order_index + 1,
+                        total_orders,
+                        e
+                    ),
+                ),
+            }
+
+            if test_mode {
+                log_info(&label, "Test mode: exiting after one batch cycle");
+                return Ok(());
+            }
+        }
+    }
+}
+
+async fn run_bidar_order_schedule(
+    config: bidar::BidarConfig,
+    order: bidar::BidarOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    final_send_epoch_ms: i64,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    let mut last_wall_epoch_ms = current_epoch_millis()?;
+    for repeat_index in 0..config.batch_repeat {
+        let scheduled_epoch_ms =
+            final_send_epoch_ms + repeat_index as i64 * config.batch_delay_ms as i64;
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms > scheduled_epoch_ms {
+            log_warn(
+                &label,
+                &format!(
+                    "Order {}/{} scheduled send time passed by {}ms for batch #{}",
+                    order_index + 1,
+                    total_orders,
+                    now_epoch_ms - scheduled_epoch_ms,
+                    repeat_index + 1
+                ),
+            );
+        }
+        wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_epoch_us = current_epoch_micros()?;
+        let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+        log_info(
+            &label,
+            &format!(
+                "Sending scheduled batch #{} order {}/{} at {} (drift {}µs, epoch_us={})",
+                repeat_index + 1,
+                order_index + 1,
+                total_orders,
+                actual_send_time.format("%H:%M:%S%.3f"),
+                drift_micros,
+                actual_epoch_us
+            ),
+        );
+
+        match bidar::send_order(
+            &config,
+            &order,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        {
+            Ok(_) => log_success(
+                &label,
+                &format!(
+                    "Batch {}/{} Order {}/{} sent",
+                    repeat_index + 1,
+                    config.batch_repeat,
+                    order_index + 1,
+                    total_orders
+                ),
+            ),
+            Err(e) => log_error(
+                &label,
+                &format!(
+                    "Batch {}/{} Order {}/{} failed: {}",
+                    repeat_index + 1,
+                    config.batch_repeat,
+                    order_index + 1,
+                    total_orders,
+                    e
+                ),
+            ),
+        }
+    }
+    Ok(())
+}
+
+async fn run_bidar_order_continuous(
+    config: bidar::BidarConfig,
+    order: bidar::BidarOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    loop {
+        for repeat_index in 0..config.batch_repeat {
+            if repeat_index > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(config.batch_delay_ms)).await;
+            }
+
+            match bidar::send_order(
+                &config,
+                &order,
+                test_mode,
+                curl_only,
+                Some(rate_limiter.as_ref()),
+            )
+            .await
+            {
+                Ok(_) => log_success(
+                    &label,
+                    &format!(
+                        "Batch {}/{} Order {}/{} sent",
+                        repeat_index + 1,
+                        config.batch_repeat,
+                        order_index + 1,
+                        total_orders
+                    ),
+                ),
+                Err(e) => log_error(
+                    &label,
+                    &format!(
+                        "Batch {}/{} Order {}/{} failed: {}",
+                        repeat_index + 1,
+                        config.batch_repeat,
+                        order_index + 1,
+                        total_orders,
+                        e
+                    ),
+                ),
+            }
+
+            if test_mode {
+                log_info(&label, "Test mode: exiting after one batch cycle");
+                return Ok(());
+            }
+        }
+    }
 }
 
 fn next_target_datetime(target_time: chrono::NaiveTime) -> Result<chrono::DateTime<chrono_tz::Tz>> {

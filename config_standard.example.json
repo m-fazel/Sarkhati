@@ -16,6 +16,8 @@
         "probe_interval_ms": 300,
         "warmup_probes": 2,
         "safety_margin_ms": 0,
+        "calibration_window_ms": 10000,
+        "calibration_start_margin_ms": 1000,
         "estimator": "p50",
         "max_acceptable_rtt_ms": 500
       },
@@ -56,6 +58,8 @@
         "probe_interval_ms": 300,
         "warmup_probes": 2,
         "safety_margin_ms": 0,
+        "calibration_window_ms": 10000,
+        "calibration_start_margin_ms": 1000,
         "estimator": "p50",
         "max_acceptable_rtt_ms": 500
       },
@@ -96,6 +100,8 @@
         "probe_interval_ms": 300,
         "warmup_probes": 2,
         "safety_margin_ms": 0,
+        "calibration_window_ms": 10000,
+        "calibration_start_margin_ms": 1000,
         "estimator": "p50",
         "max_acceptable_rtt_ms": 500
       },
@@ -136,6 +142,8 @@
         "probe_interval_ms": 300,
         "warmup_probes": 2,
         "safety_margin_ms": 0,
+        "calibration_window_ms": 10000,
+        "calibration_start_margin_ms": 1000,
         "estimator": "p50",
         "max_acceptable_rtt_ms": 500
       },

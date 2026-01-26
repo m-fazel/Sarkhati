@@ -1,4 +1,4 @@
-use crate::logging::log_info;
+use crate::logging::{log_info, log_warn};
 use crate::rate_limiter::RateLimiter;
 use anyhow::{Context, Result};
 use reqwest::StatusCode;
@@ -31,6 +31,14 @@ fn default_max_acceptable_rtt_ms() -> u64 {
     500
 }
 
+fn default_calibration_window_ms() -> u64 {
+    10_000
+}
+
+fn default_calibration_start_margin_ms() -> u64 {
+    1_000
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum CalibrationEstimator {
@@ -39,11 +47,12 @@ pub enum CalibrationEstimator {
     P90,
     Min,
     Ewma,
+    WeightedRecent,
 }
 
 impl Default for CalibrationEstimator {
     fn default() -> Self {
-        CalibrationEstimator::P50
+        CalibrationEstimator::WeightedRecent
     }
 }
 
@@ -63,6 +72,10 @@ pub struct CalibrationConfig {
     pub estimator: CalibrationEstimator,
     #[serde(default = "default_max_acceptable_rtt_ms")]
     pub max_acceptable_rtt_ms: u64,
+    #[serde(default = "default_calibration_window_ms")]
+    pub calibration_window_ms: u64,
+    #[serde(default = "default_calibration_start_margin_ms")]
+    pub calibration_start_margin_ms: u64,
 }
 
 #[derive(Debug)]
@@ -75,6 +88,7 @@ pub async fn run_calibration<F, Fut>(
     broker_label: &str,
     calibration: &CalibrationConfig,
     rate_limiter: &RateLimiter,
+    deadline_epoch_ms: Option<i64>,
     mut send_probe: F,
 ) -> Result<CalibrationSummary>
 where
@@ -82,47 +96,99 @@ where
     Fut: Future<Output = Result<(u64, u128, StatusCode)>>,
 {
     if calibration.probe_interval_ms < rate_limiter.rate_limit_ms() {
-        anyhow::bail!(
-            "probe_interval_ms ({}) must be >= batch_delay_ms ({})",
-            calibration.probe_interval_ms,
-            rate_limiter.rate_limit_ms()
+        log_warn(
+            broker_label,
+            &format!(
+                "probe_interval_ms ({}) is less than batch_delay_ms ({}); continuing anyway",
+                calibration.probe_interval_ms,
+                rate_limiter.rate_limit_ms()
+            ),
         );
     }
 
-    if calibration.warmup_probes >= calibration.probe_count {
-        anyhow::bail!("warmup_probes must be less than probe_count");
-    }
+    let warmup_probes = calibration.warmup_probes;
+    let max_probes = match deadline_epoch_ms {
+        Some(_) => usize::MAX,
+        None => calibration.probe_count.max(1),
+    };
 
-    let mut rtts_ms = Vec::with_capacity(calibration.probe_count);
+    let mut rtts_ms = Vec::with_capacity(calibration.probe_count.max(1));
     let mut last_probe_wall = SystemTime::now();
     let mut last_wall_time = SystemTime::now();
 
     log_info(
         broker_label,
         &format!(
-            "Calibration enabled: {} probes every {}ms (warmup: {})",
-            calibration.probe_count, calibration.probe_interval_ms, calibration.warmup_probes
+            "Calibration enabled: probing every {}ms (warmup: {})",
+            calibration.probe_interval_ms, warmup_probes
         ),
     );
 
-    for probe_index in 0..calibration.probe_count {
+    for probe_index in 0..max_probes {
+        if let Some(deadline_epoch_ms) = deadline_epoch_ms {
+            if SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as i64 >= deadline_epoch_ms)
+                .unwrap_or(true)
+            {
+                log_warn(
+                    broker_label,
+                    "Calibration deadline reached; finishing with collected samples",
+                );
+                break;
+            }
+        }
+
         let probe_start = Instant::now();
 
         rate_limiter.wait().await;
+        if let Some(deadline_epoch_ms) = deadline_epoch_ms {
+            if SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as i64 >= deadline_epoch_ms)
+                .unwrap_or(true)
+            {
+                log_warn(
+                    broker_label,
+                    "Calibration deadline reached before probe send; finishing early",
+                );
+                break;
+            }
+        }
         let current_wall = SystemTime::now();
         if current_wall < last_wall_time {
-            anyhow::bail!("System clock moved backwards during calibration; aborting");
+            log_warn(
+                broker_label,
+                "System clock moved backwards during calibration; finishing early",
+            );
+            break;
         }
         last_wall_time = current_wall;
-        let (rtt_ms, rtt_micros, status) = send_probe().await?;
+        let probe_result = send_probe().await;
+        let (rtt_ms, rtt_micros, status) = match probe_result {
+            Ok(values) => values,
+            Err(err) => {
+                log_warn(
+                    broker_label,
+                    &format!("Probe failed (index {}): {}", probe_index + 1, err),
+                );
+                if probe_index + 1 < calibration.probe_count {
+                    let elapsed = probe_start.elapsed();
+                    let target = Duration::from_millis(calibration.probe_interval_ms);
+                    if elapsed < target {
+                        sleep(target - elapsed).await;
+                    }
+                }
+                continue;
+            }
+        };
         last_probe_wall = SystemTime::now();
 
         log_info(
             broker_label,
             &format!(
-                "Probe #{}/{} status={} rtt={}ms ({}µs)",
+                "Probe #{} status={} rtt={}ms ({}µs)",
                 probe_index + 1,
-                calibration.probe_count,
                 status,
                 rtt_ms,
                 rtt_micros
@@ -130,16 +196,18 @@ where
         );
 
         if rtt_ms > calibration.max_acceptable_rtt_ms {
-            anyhow::bail!(
-                "Probe RTT {}ms exceeded max_acceptable_rtt_ms {}",
-                rtt_ms,
-                calibration.max_acceptable_rtt_ms
+            log_warn(
+                broker_label,
+                &format!(
+                    "Probe RTT {}ms exceeded max_acceptable_rtt_ms {}; marking as outlier",
+                    rtt_ms, calibration.max_acceptable_rtt_ms
+                ),
             );
+        } else {
+            rtts_ms.push(rtt_ms);
         }
 
-        rtts_ms.push(rtt_ms);
-
-        if probe_index + 1 < calibration.probe_count {
+        if probe_index + 1 < max_probes {
             let elapsed = probe_start.elapsed();
             let target = Duration::from_millis(calibration.probe_interval_ms);
             if elapsed < target {
@@ -148,14 +216,29 @@ where
         }
     }
 
-    let samples_ms = rtts_ms
+    let mut samples_ms = rtts_ms
         .iter()
-        .skip(calibration.warmup_probes)
+        .skip(warmup_probes)
         .copied()
         .collect::<Vec<_>>();
 
     if samples_ms.is_empty() {
-        anyhow::bail!("No calibration samples available after warmup.");
+        if !rtts_ms.is_empty() {
+            log_warn(
+                broker_label,
+                "No calibration samples after warmup; using all collected samples",
+            );
+            samples_ms = rtts_ms.clone();
+        } else {
+            log_warn(
+                broker_label,
+                "No calibration samples available; using zero delay estimate",
+            );
+            return Ok(CalibrationSummary {
+                estimated_delay_ms: 0,
+                last_probe_wall_time: last_probe_wall,
+            });
+        }
     }
 
     let mut sorted = samples_ms.clone();
@@ -174,6 +257,7 @@ where
         CalibrationEstimator::P90 => p90_ms,
         CalibrationEstimator::Min => min_ms,
         CalibrationEstimator::Ewma => ewma(&samples_ms, 0.3),
+        CalibrationEstimator::WeightedRecent => weighted_recent(&samples_ms),
     };
 
     log_info(
@@ -226,4 +310,18 @@ fn ewma(samples: &[u64], alpha: f64) -> u64 {
         value = alpha * sample as f64 + (1.0 - alpha) * value;
     }
     value.round().max(0.0) as u64
+}
+
+fn weighted_recent(samples: &[u64]) -> u64 {
+    let mut weighted_sum: u128 = 0;
+    let mut weight_total: u128 = 0;
+    for (index, &sample) in samples.iter().enumerate() {
+        let weight = (index as u128) + 1;
+        weighted_sum = weighted_sum.saturating_add(sample as u128 * weight);
+        weight_total = weight_total.saturating_add(weight);
+    }
+    if weight_total == 0 {
+        return 0;
+    }
+    (weighted_sum / weight_total) as u64
 }

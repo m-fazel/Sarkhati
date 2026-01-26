@@ -243,20 +243,17 @@ async fn run_standard_broker(
                 );
             }
 
+            let mut calibration_deadline_epoch_ms = None;
             if calibration_enabled {
                 let calibration = broker
                     .calibration
                     .as_ref()
                     .context("Calibration config missing")?;
-                let expected_duration_ms =
-                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
-                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
-                let estimated_effective_delay_ms =
-                    max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms =
-                    target_epoch_ms - estimated_effective_delay_ms - broker.batch_delay_ms as i64;
+                let calibration_deadline =
+                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+                calibration_deadline_epoch_ms = Some(calibration_deadline);
                 let calibration_start_epoch_ms =
-                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                    calibration_deadline - calibration.calibration_window_ms as i64;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
                     log_info(
@@ -269,9 +266,10 @@ async fn run_standard_broker(
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
                 let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > latest_probe_finish_epoch_ms {
-                    anyhow::bail!(
-                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                if now_epoch_ms > calibration_deadline {
+                    log_warn(
+                        &broker.name,
+                        "Too late to calibrate before target_time; proceeding with available data",
                     );
                 }
             }
@@ -279,8 +277,13 @@ async fn run_standard_broker(
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
                     let summary =
-                        standard_broker::run_calibration(&broker, &client, rate_limiter.as_ref())
-                            .await?;
+                        standard_broker::run_calibration(
+                            &broker,
+                            &client,
+                            rate_limiter.as_ref(),
+                            calibration_deadline_epoch_ms,
+                        )
+                        .await?;
                     (
                         summary.estimated_delay_ms,
                         broker
@@ -308,8 +311,9 @@ async fn run_standard_broker(
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
-                anyhow::bail!(
-                    "final_send_time has already passed; increase target_time or reduce delay"
+                log_warn(
+                    &broker.name,
+                    "final_send_time has already passed; sending as soon as possible",
                 );
             }
 
@@ -319,9 +323,12 @@ async fn run_standard_broker(
                     .as_millis() as i64;
                 let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
                 if gap_ms < broker.batch_delay_ms as i64 {
-                    anyhow::bail!(
-                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
-                        broker.batch_delay_ms
+                    log_warn(
+                        &broker.name,
+                        &format!(
+                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                            gap_ms, broker.batch_delay_ms
+                        ),
                     );
                 }
             }
@@ -520,20 +527,17 @@ async fn run_exir_broker(
                 );
             }
 
+            let mut calibration_deadline_epoch_ms = None;
             if calibration_enabled {
                 let calibration = broker
                     .calibration
                     .as_ref()
                     .context("Calibration config missing")?;
-                let expected_duration_ms =
-                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
-                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
-                let estimated_effective_delay_ms =
-                    max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms =
-                    target_epoch_ms - estimated_effective_delay_ms - broker.batch_delay_ms as i64;
+                let calibration_deadline =
+                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+                calibration_deadline_epoch_ms = Some(calibration_deadline);
                 let calibration_start_epoch_ms =
-                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                    calibration_deadline - calibration.calibration_window_ms as i64;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
                     log_info(
@@ -546,18 +550,23 @@ async fn run_exir_broker(
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
                 let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > latest_probe_finish_epoch_ms {
-                    anyhow::bail!(
-                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                if now_epoch_ms > calibration_deadline {
+                    log_warn(
+                        &broker.name,
+                        "Too late to calibrate before target_time; proceeding with available data",
                     );
                 }
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary =
-                        exir_broker::run_calibration(&broker, &client, rate_limiter.as_ref())
-                            .await?;
+                    let summary = exir_broker::run_calibration(
+                        &broker,
+                        &client,
+                        rate_limiter.as_ref(),
+                        calibration_deadline_epoch_ms,
+                    )
+                    .await?;
                     (
                         summary.estimated_delay_ms,
                         broker
@@ -585,8 +594,9 @@ async fn run_exir_broker(
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
-                anyhow::bail!(
-                    "final_send_time has already passed; increase target_time or reduce delay"
+                log_warn(
+                    &broker.name,
+                    "final_send_time has already passed; sending as soon as possible",
                 );
             }
 
@@ -596,9 +606,12 @@ async fn run_exir_broker(
                     .as_millis() as i64;
                 let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
                 if gap_ms < broker.batch_delay_ms as i64 {
-                    anyhow::bail!(
-                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
-                        broker.batch_delay_ms
+                    log_warn(
+                        &broker.name,
+                        &format!(
+                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                            gap_ms, broker.batch_delay_ms
+                        ),
                     );
                 }
             }
@@ -807,20 +820,17 @@ async fn run_mofid_account(
                 );
             }
 
+            let mut calibration_deadline_epoch_ms = None;
             if calibration_enabled {
                 let calibration = config
                     .calibration
                     .as_ref()
                     .context("Calibration config missing")?;
-                let expected_duration_ms =
-                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
-                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
-                let estimated_effective_delay_ms =
-                    max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms =
-                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
+                let calibration_deadline =
+                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+                calibration_deadline_epoch_ms = Some(calibration_deadline);
                 let calibration_start_epoch_ms =
-                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                    calibration_deadline - calibration.calibration_window_ms as i64;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
                     log_info(
@@ -833,17 +843,23 @@ async fn run_mofid_account(
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
                 let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > latest_probe_finish_epoch_ms {
-                    anyhow::bail!(
-                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                if now_epoch_ms > calibration_deadline {
+                    log_warn(
+                        &label,
+                        "Too late to calibrate before target_time; proceeding with available data",
                     );
                 }
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary =
-                        mofid::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
+                    let summary = mofid::run_calibration(
+                        &config,
+                        &client,
+                        rate_limiter.as_ref(),
+                        calibration_deadline_epoch_ms,
+                    )
+                    .await?;
                     (
                         summary.estimated_delay_ms,
                         config
@@ -868,8 +884,9 @@ async fn run_mofid_account(
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
-                anyhow::bail!(
-                    "final_send_time has already passed; increase target_time or reduce delay"
+                log_warn(
+                    &label,
+                    "final_send_time has already passed; sending as soon as possible",
                 );
             }
 
@@ -879,9 +896,12 @@ async fn run_mofid_account(
                     .as_millis() as i64;
                 let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
                 if gap_ms < config.batch_delay_ms as i64 {
-                    anyhow::bail!(
-                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
-                        config.batch_delay_ms
+                    log_warn(
+                        &label,
+                        &format!(
+                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                            gap_ms, config.batch_delay_ms
+                        ),
                     );
                 }
             }
@@ -1085,20 +1105,17 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                 );
             }
 
+            let mut calibration_deadline_epoch_ms = None;
             if calibration_enabled {
                 let calibration = config
                     .calibration
                     .as_ref()
                     .context("Calibration config missing")?;
-                let expected_duration_ms =
-                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
-                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
-                let estimated_effective_delay_ms =
-                    max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms =
-                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
+                let calibration_deadline =
+                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+                calibration_deadline_epoch_ms = Some(calibration_deadline);
                 let calibration_start_epoch_ms =
-                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                    calibration_deadline - calibration.calibration_window_ms as i64;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
                     log_info(
@@ -1111,17 +1128,23 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
                 let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > latest_probe_finish_epoch_ms {
-                    anyhow::bail!(
-                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                if now_epoch_ms > calibration_deadline {
+                    log_warn(
+                        "BMI",
+                        "Too late to calibrate before target_time; proceeding with available data",
                     );
                 }
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary =
-                        bmi::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
+                    let summary = bmi::run_calibration(
+                        &config,
+                        &client,
+                        rate_limiter.as_ref(),
+                        calibration_deadline_epoch_ms,
+                    )
+                    .await?;
                     (
                         summary.estimated_delay_ms,
                         config
@@ -1146,8 +1169,9 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
-                anyhow::bail!(
-                    "final_send_time has already passed; increase target_time or reduce delay"
+                log_warn(
+                    "BMI",
+                    "final_send_time has already passed; sending as soon as possible",
                 );
             }
 
@@ -1157,9 +1181,12 @@ async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
                     .as_millis() as i64;
                 let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
                 if gap_ms < config.batch_delay_ms as i64 {
-                    anyhow::bail!(
-                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
-                        config.batch_delay_ms
+                    log_warn(
+                        "BMI",
+                        &format!(
+                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                            gap_ms, config.batch_delay_ms
+                        ),
                     );
                 }
             }
@@ -1387,20 +1414,17 @@ async fn run_danayan_account(
                 );
             }
 
+            let mut calibration_deadline_epoch_ms = None;
             if calibration_enabled {
                 let calibration = config
                     .calibration
                     .as_ref()
                     .context("Calibration config missing")?;
-                let expected_duration_ms =
-                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
-                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
-                let estimated_effective_delay_ms =
-                    max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms =
-                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
+                let calibration_deadline =
+                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+                calibration_deadline_epoch_ms = Some(calibration_deadline);
                 let calibration_start_epoch_ms =
-                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                    calibration_deadline - calibration.calibration_window_ms as i64;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
                     log_info(
@@ -1413,17 +1437,23 @@ async fn run_danayan_account(
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
                 let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > latest_probe_finish_epoch_ms {
-                    anyhow::bail!(
-                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                if now_epoch_ms > calibration_deadline {
+                    log_warn(
+                        &label,
+                        "Too late to calibrate before target_time; proceeding with available data",
                     );
                 }
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary =
-                        danayan::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
+                    let summary = danayan::run_calibration(
+                        &config,
+                        &client,
+                        rate_limiter.as_ref(),
+                        calibration_deadline_epoch_ms,
+                    )
+                    .await?;
                     (
                         summary.estimated_delay_ms,
                         config
@@ -1448,8 +1478,9 @@ async fn run_danayan_account(
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
-                anyhow::bail!(
-                    "final_send_time has already passed; increase target_time or reduce delay"
+                log_warn(
+                    &label,
+                    "final_send_time has already passed; sending as soon as possible",
                 );
             }
 
@@ -1459,9 +1490,12 @@ async fn run_danayan_account(
                     .as_millis() as i64;
                 let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
                 if gap_ms < config.batch_delay_ms as i64 {
-                    anyhow::bail!(
-                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
-                        config.batch_delay_ms
+                    log_warn(
+                        &label,
+                        &format!(
+                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                            gap_ms, config.batch_delay_ms
+                        ),
                     );
                 }
             }
@@ -1675,20 +1709,17 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                 );
             }
 
+            let mut calibration_deadline_epoch_ms = None;
             if calibration_enabled {
                 let calibration = config
                     .calibration
                     .as_ref()
                     .context("Calibration config missing")?;
-                let expected_duration_ms =
-                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
-                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
-                let estimated_effective_delay_ms =
-                    max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms =
-                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
+                let calibration_deadline =
+                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+                calibration_deadline_epoch_ms = Some(calibration_deadline);
                 let calibration_start_epoch_ms =
-                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                    calibration_deadline - calibration.calibration_window_ms as i64;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
                     log_info(
@@ -1701,18 +1732,23 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
                 let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > latest_probe_finish_epoch_ms {
-                    anyhow::bail!(
-                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                if now_epoch_ms > calibration_deadline {
+                    log_warn(
+                        "Ordibehesht",
+                        "Too late to calibrate before target_time; proceeding with available data",
                     );
                 }
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary =
-                        ordibehesht::run_calibration(&config, &client, rate_limiter.as_ref())
-                            .await?;
+                    let summary = ordibehesht::run_calibration(
+                        &config,
+                        &client,
+                        rate_limiter.as_ref(),
+                        calibration_deadline_epoch_ms,
+                    )
+                    .await?;
                     (
                         summary.estimated_delay_ms,
                         config
@@ -1740,8 +1776,9 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
-                anyhow::bail!(
-                    "final_send_time has already passed; increase target_time or reduce delay"
+                log_warn(
+                    "Ordibehesht",
+                    "final_send_time has already passed; sending as soon as possible",
                 );
             }
 
@@ -1751,9 +1788,12 @@ async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
                     .as_millis() as i64;
                 let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
                 if gap_ms < config.batch_delay_ms as i64 {
-                    anyhow::bail!(
-                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
-                        config.batch_delay_ms
+                    log_warn(
+                        "Ordibehesht",
+                        &format!(
+                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                            gap_ms, config.batch_delay_ms
+                        ),
                     );
                 }
             }
@@ -1953,20 +1993,17 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                 );
             }
 
+            let mut calibration_deadline_epoch_ms = None;
             if calibration_enabled {
                 let calibration = config
                     .calibration
                     .as_ref()
                     .context("Calibration config missing")?;
-                let expected_duration_ms =
-                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
-                let max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
-                let estimated_effective_delay_ms =
-                    max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms =
-                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
+                let calibration_deadline =
+                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+                calibration_deadline_epoch_ms = Some(calibration_deadline);
                 let calibration_start_epoch_ms =
-                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                    calibration_deadline - calibration.calibration_window_ms as i64;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
                     log_info(
@@ -1979,17 +2016,23 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
                 let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > latest_probe_finish_epoch_ms {
-                    anyhow::bail!(
-                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                if now_epoch_ms > calibration_deadline {
+                    log_warn(
+                        "Alvand",
+                        "Too late to calibrate before target_time; proceeding with available data",
                     );
                 }
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary =
-                        alvand::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
+                    let summary = alvand::run_calibration(
+                        &config,
+                        &client,
+                        rate_limiter.as_ref(),
+                        calibration_deadline_epoch_ms,
+                    )
+                    .await?;
                     (
                         summary.estimated_delay_ms,
                         config
@@ -2014,8 +2057,9 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
-                anyhow::bail!(
-                    "final_send_time has already passed; increase target_time or reduce delay"
+                log_warn(
+                    "Alvand",
+                    "final_send_time has already passed; sending as soon as possible",
                 );
             }
 
@@ -2025,9 +2069,12 @@ async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
                     .as_millis() as i64;
                 let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
                 if gap_ms < config.batch_delay_ms as i64 {
-                    anyhow::bail!(
-                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
-                        config.batch_delay_ms
+                    log_warn(
+                        "Alvand",
+                        &format!(
+                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                            gap_ms, config.batch_delay_ms
+                        ),
                     );
                 }
             }
@@ -2259,23 +2306,17 @@ async fn run_bidar_account(
                 );
             }
 
+            let mut calibration_deadline_epoch_ms = None;
             if calibration_enabled {
                 let calibration = config
                     .calibration
                     .as_ref()
                     .context("Calibration config missing")?;
-                let expected_duration_ms =
-                    calibration.probe_count as i64 * calibration.probe_interval_ms as i64;
-                let mut max_delay_ms = calibration.max_acceptable_rtt_ms as i64;
-                if matches!(config.delay_model, bidar::BidarDelayModel::HalfRtt) {
-                    max_delay_ms = (max_delay_ms + 1) / 2;
-                }
-                let estimated_effective_delay_ms =
-                    max_delay_ms + calibration.safety_margin_ms as i64;
-                let latest_probe_finish_epoch_ms =
-                    target_epoch_ms - estimated_effective_delay_ms - config.batch_delay_ms as i64;
+                let calibration_deadline =
+                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+                calibration_deadline_epoch_ms = Some(calibration_deadline);
                 let calibration_start_epoch_ms =
-                    latest_probe_finish_epoch_ms - expected_duration_ms;
+                    calibration_deadline - calibration.calibration_window_ms as i64;
                 if now_epoch_ms < calibration_start_epoch_ms {
                     let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
                     log_info(
@@ -2288,17 +2329,23 @@ async fn run_bidar_account(
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
                 }
                 let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > latest_probe_finish_epoch_ms {
-                    anyhow::bail!(
-                        "Too late to calibrate before target_time; start earlier or reduce probes"
+                if now_epoch_ms > calibration_deadline {
+                    log_warn(
+                        &label,
+                        "Too late to calibrate before target_time; proceeding with available data",
                     );
                 }
             }
 
             let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
                 if calibration_enabled {
-                    let summary =
-                        bidar::run_calibration(&config, &client, rate_limiter.as_ref()).await?;
+                    let summary = bidar::run_calibration(
+                        &config,
+                        &client,
+                        rate_limiter.as_ref(),
+                        calibration_deadline_epoch_ms,
+                    )
+                    .await?;
                     let mut estimated_delay_ms = summary.estimated_delay_ms;
                     match config.delay_model {
                         bidar::BidarDelayModel::Rtt => {}
@@ -2337,8 +2384,9 @@ async fn run_bidar_account(
 
             let now_epoch_ms = current_epoch_millis()?;
             if final_send_epoch_ms <= now_epoch_ms {
-                anyhow::bail!(
-                    "final_send_time has already passed; increase target_time or reduce delay"
+                log_warn(
+                    &label,
+                    "final_send_time has already passed; sending as soon as possible",
                 );
             }
 
@@ -2348,9 +2396,12 @@ async fn run_bidar_account(
                     .as_millis() as i64;
                 let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
                 if gap_ms < config.batch_delay_ms as i64 {
-                    anyhow::bail!(
-                        "Last probe is too close to final_send_time; ensure at least {}ms gap",
-                        config.batch_delay_ms
+                    log_warn(
+                        &label,
+                        &format!(
+                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                            gap_ms, config.batch_delay_ms
+                        ),
                     );
                 }
             }

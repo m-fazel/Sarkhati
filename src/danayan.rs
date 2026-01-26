@@ -195,13 +195,14 @@ pub async fn run_calibration(
     config: &DanayanConfig,
     client: &reqwest::Client,
     rate_limiter: &RateLimiter,
+    deadline_epoch_ms: Option<i64>,
 ) -> Result<calibration::CalibrationSummary> {
     let calibration = config
         .calibration
         .as_ref()
         .context("Calibration config missing")?;
 
-    calibration::run_calibration("[Danayan]", calibration, rate_limiter, || {
+    calibration::run_calibration("[Danayan]", calibration, rate_limiter, deadline_epoch_ms, || {
         send_probe(client, config)
     })
     .await

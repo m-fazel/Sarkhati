@@ -258,6 +258,7 @@ pub async fn run_calibration(
     broker: &ExirBrokerConfig,
     client: &reqwest::Client,
     rate_limiter: &RateLimiter,
+    deadline_epoch_ms: Option<i64>,
 ) -> Result<calibration::CalibrationSummary> {
     let calibration = broker
         .calibration
@@ -265,7 +266,7 @@ pub async fn run_calibration(
         .context("Calibration config missing")?;
 
     let prefix = format!("[{}]", broker.name);
-    calibration::run_calibration(&prefix, calibration, rate_limiter, || {
+    calibration::run_calibration(&prefix, calibration, rate_limiter, deadline_epoch_ms, || {
         send_probe(broker, client)
     })
     .await

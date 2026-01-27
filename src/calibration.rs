@@ -5,7 +5,7 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::time::{Duration, Instant, SystemTime};
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 fn default_calibration_enabled() -> bool {
     true
@@ -164,7 +164,31 @@ where
             break;
         }
         last_wall_time = current_wall;
-        let probe_result = send_probe().await;
+        let probe_result = if let Some(deadline_epoch_ms) = deadline_epoch_ms {
+            let remaining_ms = crate::time_reference::now_system_time()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|duration| deadline_epoch_ms.saturating_sub(duration.as_millis() as i64))
+                .unwrap_or(0);
+            if remaining_ms <= 0 {
+                log_warn(
+                    broker_label,
+                    "Calibration deadline reached before probe dispatch; finishing early",
+                );
+                break;
+            }
+            match timeout(Duration::from_millis(remaining_ms as u64), send_probe()).await {
+                Ok(result) => result,
+                Err(_) => {
+                    log_warn(
+                        broker_label,
+                        "Calibration deadline reached while waiting for probe response; finishing early",
+                    );
+                    break;
+                }
+            }
+        } else {
+            send_probe().await
+        };
         let (rtt_ms, rtt_micros, status) = match probe_result {
             Ok(values) => values,
             Err(err) => {

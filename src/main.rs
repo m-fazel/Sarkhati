@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
             log_error(
                 "CLI",
                 &format!(
-                    "Usage: {} <mofid|danayan|bidar|all|BROKER_NAME> [test] [curl]",
+                    "Usage: {} <mofid|danayan|bidar|standard|exir|all|BROKER_NAME> [test] [curl]",
                     args[0]
                 ),
             );
@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
             log_error(
                 "CLI",
                 &format!(
-                    "Usage: {} <mofid|danayan|bidar|all|BROKER_NAME> [test] [curl]",
+                    "Usage: {} <mofid|danayan|bidar|standard|exir|all|BROKER_NAME> [test] [curl]",
                     args[0]
                 ),
             );
@@ -78,6 +78,8 @@ async fn main() -> Result<()> {
         "mofid" => run_mofid(test_mode, curl_only).await,
         "danayan" => run_danayan(test_mode, curl_only).await,
         "bidar" => run_bidar(test_mode, curl_only).await,
+        "standard" => run_standard(test_mode, curl_only).await,
+        "exir" => run_exir(test_mode, curl_only).await,
         "all" => run_all(test_mode, curl_only).await,
         other => match run_standard_broker_by_name(other, test_mode, curl_only).await {
             Ok(()) => Ok(()),
@@ -135,6 +137,58 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
         let _ = handle.await;
     }
     for handle in exir_handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
+}
+
+async fn run_standard(test_mode: bool, curl_only: bool) -> Result<()> {
+    log_info("Standard", "Starting Sarkhati - Standard Brokers");
+
+    let standard_config = standard_broker::load_config("config_standard.json")?;
+    if standard_config.accounts.is_empty() {
+        log_warn("Standard", "No accounts found in config_standard.json; skipping.");
+        return Ok(());
+    }
+
+    let mut handles = Vec::new();
+    for broker in standard_config.accounts {
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_standard_broker(broker, test_mode, curl_only).await {
+                log_error("Standard", &format!("Stopped with error: {}", e));
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
+}
+
+async fn run_exir(test_mode: bool, curl_only: bool) -> Result<()> {
+    log_info("Exir", "Starting Sarkhati - Exir Brokers");
+
+    let exir_config = exir_broker::load_config("config_exir.json")?;
+    if exir_config.accounts.is_empty() {
+        log_warn("Exir", "No accounts found in config_exir.json; skipping.");
+        return Ok(());
+    }
+
+    let mut handles = Vec::new();
+    for broker in exir_config.accounts {
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_exir_broker(broker, test_mode, curl_only).await {
+                log_error("Exir", &format!("Stopped with error: {}", e));
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
         let _ = handle.await;
     }
 
@@ -222,174 +276,35 @@ async fn run_standard_broker(
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
-        let calibration_enabled = broker
-            .calibration
-            .as_ref()
-            .map_or(false, |calibration| calibration.enabled);
-        let client = reqwest::Client::new();
-
-        loop {
-            let target_datetime = next_target_datetime(target_time)?;
-            let target_epoch_ms = target_datetime.timestamp_millis();
-            let now_epoch_ms = current_epoch_millis()?;
-            if now_epoch_ms < target_epoch_ms {
-                log_info(
-                    &broker.name,
-                    &format!(
-                        "Next target_time={} (epoch_ms={})",
-                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        target_epoch_ms
-                    ),
-                );
-            }
-
-            let mut calibration_deadline_epoch_ms = None;
-            if calibration_enabled {
-                let calibration = broker
-                    .calibration
-                    .as_ref()
-                    .context("Calibration config missing")?;
-                let calibration_deadline =
-                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
-                calibration_deadline_epoch_ms = Some(calibration_deadline);
-                let calibration_start_epoch_ms =
-                    calibration_deadline - calibration.calibration_window_ms as i64;
-                if now_epoch_ms < calibration_start_epoch_ms {
-                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    log_info(
-                        &broker.name,
-                        &format!(
-                            "Waiting {}ms before calibration window (epoch_ms={})",
-                            sleep_ms, calibration_start_epoch_ms
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
-                }
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > calibration_deadline {
-                    log_warn(
-                        &broker.name,
-                        "Too late to calibrate before target_time; proceeding with available data",
+        let total_orders = broker.orders.len();
+        let mut handles = Vec::new();
+        for (order_index, order) in broker.orders.iter().enumerate() {
+            let broker_clone = broker.clone();
+            let order_json = serde_json::to_string(order)?;
+            let broker_name = broker.name.clone();
+            let handle = tokio::spawn(async move {
+                if let Err(e) = run_standard_order_scheduled_task(
+                    broker_clone,
+                    order_json,
+                    order_index,
+                    total_orders,
+                    target_time,
+                    test_mode,
+                    curl_only,
+                )
+                .await
+                {
+                    log_error(
+                        &broker_name,
+                        &format!("Order thread {} stopped: {}", order_index + 1, e),
                     );
                 }
-            }
+            });
+            handles.push(handle);
+        }
 
-            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-                if calibration_enabled {
-                    let summary =
-                        standard_broker::run_calibration(
-                            &broker,
-                            &client,
-                            rate_limiter.as_ref(),
-                            calibration_deadline_epoch_ms,
-                        )
-                        .await?;
-                    (
-                        summary.estimated_delay_ms,
-                        broker
-                            .calibration
-                            .as_ref()
-                            .map(|calibration| calibration.safety_margin_ms)
-                            .unwrap_or_default(),
-                        summary.last_probe_wall_time,
-                    )
-                } else {
-                    log_info(
-                        &broker.name,
-                        "Calibration disabled; using zero delay estimate.",
-                    );
-                    (0, 0, std::time::SystemTime::now())
-                };
-
-            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
-                std::time::UNIX_EPOCH
-                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            )
-            .with_timezone(&Tehran);
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if final_send_epoch_ms <= now_epoch_ms {
-                log_warn(
-                    &broker.name,
-                    "final_send_time has already passed; sending as soon as possible",
-                );
-            }
-
-            if calibration_enabled {
-                let last_probe_epoch_ms = last_probe_wall_time
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_millis() as i64;
-                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
-                if gap_ms < broker.batch_delay_ms as i64 {
-                    log_warn(
-                        &broker.name,
-                        &format!(
-                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
-                            gap_ms, broker.batch_delay_ms
-                        ),
-                    );
-                }
-            }
-
-            log_info(
-                &broker.name,
-                &format!(
-                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                    target_datetime.format("%H:%M:%S%.3f"),
-                    final_send_time.format("%H:%M:%S%.3f"),
-                    estimated_delay_ms,
-                    safety_margin_ms,
-                    effective_delay_ms
-                ),
-            );
-            log_info(
-                &broker.name,
-                &format!(
-                    "target_epoch_ms={} final_send_epoch_ms={}",
-                    target_epoch_ms, final_send_epoch_ms
-                ),
-            );
-
-            let total_orders = broker.orders.len();
-            let mut handles = Vec::new();
-            for (order_index, order) in broker.orders.iter().enumerate() {
-                let broker_clone = broker.clone();
-                let order_json = serde_json::to_string(order)?;
-                let broker_name = broker.name.clone();
-                let limiter =
-                    std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
-                let handle = tokio::spawn(async move {
-                    if let Err(e) = run_standard_order_schedule(
-                        broker_clone,
-                        order_json,
-                        order_index,
-                        total_orders,
-                        final_send_epoch_ms,
-                        test_mode,
-                        curl_only,
-                        limiter,
-                    )
-                    .await
-                    {
-                        log_error(
-                            &broker_name,
-                            &format!("Order thread {} stopped: {}", order_index + 1, e),
-                        );
-                    }
-                });
-                handles.push(handle);
-            }
-
-            for handle in handles {
-                let _ = handle.await;
-            }
-
-            if test_mode {
-                log_info(&broker.name, "Test mode: exiting after scheduled send");
-                return Ok(());
-            }
+        for handle in handles {
+            let _ = handle.await;
         }
     }
 
@@ -506,173 +421,35 @@ async fn run_exir_broker(
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
-        let calibration_enabled = broker
-            .calibration
-            .as_ref()
-            .map_or(false, |calibration| calibration.enabled);
-        let client = reqwest::Client::new();
-
-        loop {
-            let target_datetime = next_target_datetime(target_time)?;
-            let target_epoch_ms = target_datetime.timestamp_millis();
-            let now_epoch_ms = current_epoch_millis()?;
-            if now_epoch_ms < target_epoch_ms {
-                log_info(
-                    &broker.name,
-                    &format!(
-                        "Next target_time={} (epoch_ms={})",
-                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        target_epoch_ms
-                    ),
-                );
-            }
-
-            let mut calibration_deadline_epoch_ms = None;
-            if calibration_enabled {
-                let calibration = broker
-                    .calibration
-                    .as_ref()
-                    .context("Calibration config missing")?;
-                let calibration_deadline =
-                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
-                calibration_deadline_epoch_ms = Some(calibration_deadline);
-                let calibration_start_epoch_ms =
-                    calibration_deadline - calibration.calibration_window_ms as i64;
-                if now_epoch_ms < calibration_start_epoch_ms {
-                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    log_info(
-                        &broker.name,
-                        &format!(
-                            "Waiting {}ms before calibration window (epoch_ms={})",
-                            sleep_ms, calibration_start_epoch_ms
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
-                }
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > calibration_deadline {
-                    log_warn(
-                        &broker.name,
-                        "Too late to calibrate before target_time; proceeding with available data",
+        let total_orders = broker.orders.len();
+        let mut handles = Vec::new();
+        for (order_index, order) in broker.orders.iter().enumerate() {
+            let broker_clone = broker.clone();
+            let order_json = serde_json::to_string(order)?;
+            let broker_name = broker.name.clone();
+            let handle = tokio::spawn(async move {
+                if let Err(e) = run_exir_order_scheduled_task(
+                    broker_clone,
+                    order_json,
+                    order_index,
+                    total_orders,
+                    target_time,
+                    test_mode,
+                    curl_only,
+                )
+                .await
+                {
+                    log_error(
+                        &broker_name,
+                        &format!("Order thread {} stopped: {}", order_index + 1, e),
                     );
                 }
-            }
+            });
+            handles.push(handle);
+        }
 
-            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-                if calibration_enabled {
-                    let summary = exir_broker::run_calibration(
-                        &broker,
-                        &client,
-                        rate_limiter.as_ref(),
-                        calibration_deadline_epoch_ms,
-                    )
-                    .await?;
-                    (
-                        summary.estimated_delay_ms,
-                        broker
-                            .calibration
-                            .as_ref()
-                            .map(|calibration| calibration.safety_margin_ms)
-                            .unwrap_or_default(),
-                        summary.last_probe_wall_time,
-                    )
-                } else {
-                    log_info(
-                        &broker.name,
-                        "Calibration disabled; using zero delay estimate.",
-                    );
-                    (0, 0, std::time::SystemTime::now())
-                };
-
-            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
-                std::time::UNIX_EPOCH
-                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            )
-            .with_timezone(&Tehran);
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if final_send_epoch_ms <= now_epoch_ms {
-                log_warn(
-                    &broker.name,
-                    "final_send_time has already passed; sending as soon as possible",
-                );
-            }
-
-            if calibration_enabled {
-                let last_probe_epoch_ms = last_probe_wall_time
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_millis() as i64;
-                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
-                if gap_ms < broker.batch_delay_ms as i64 {
-                    log_warn(
-                        &broker.name,
-                        &format!(
-                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
-                            gap_ms, broker.batch_delay_ms
-                        ),
-                    );
-                }
-            }
-
-            log_info(
-                &broker.name,
-                &format!(
-                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                    target_datetime.format("%H:%M:%S%.3f"),
-                    final_send_time.format("%H:%M:%S%.3f"),
-                    estimated_delay_ms,
-                    safety_margin_ms,
-                    effective_delay_ms
-                ),
-            );
-            log_info(
-                &broker.name,
-                &format!(
-                    "target_epoch_ms={} final_send_epoch_ms={}",
-                    target_epoch_ms, final_send_epoch_ms
-                ),
-            );
-
-            let total_orders = broker.orders.len();
-            let mut handles = Vec::new();
-            for (order_index, order) in broker.orders.iter().enumerate() {
-                let broker_clone = broker.clone();
-                let order_json = serde_json::to_string(order)?;
-                let broker_name = broker.name.clone();
-                let limiter =
-                    std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
-                let handle = tokio::spawn(async move {
-                    if let Err(e) = run_exir_order_schedule(
-                        broker_clone,
-                        order_json,
-                        order_index,
-                        total_orders,
-                        final_send_epoch_ms,
-                        test_mode,
-                        curl_only,
-                        limiter,
-                    )
-                    .await
-                    {
-                        log_error(
-                            &broker_name,
-                            &format!("Order thread {} stopped: {}", order_index + 1, e),
-                        );
-                    }
-                });
-                handles.push(handle);
-            }
-
-            for handle in handles {
-                let _ = handle.await;
-            }
-
-            if test_mode {
-                log_info(&broker.name, "Test mode: exiting after scheduled send");
-                return Ok(());
-            }
+        for handle in handles {
+            let _ = handle.await;
         }
     }
 
@@ -799,171 +576,36 @@ async fn run_mofid_account(
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
-        let calibration_enabled = config
-            .calibration
-            .as_ref()
-            .map_or(false, |calibration| calibration.enabled);
-        let client = reqwest::Client::new();
-
-        loop {
-            let target_datetime = next_target_datetime(target_time)?;
-            let target_epoch_ms = target_datetime.timestamp_millis();
-            let now_epoch_ms = current_epoch_millis()?;
-            if now_epoch_ms < target_epoch_ms {
-                log_info(
-                    &label,
-                    &format!(
-                        "Next target_time={} (epoch_ms={})",
-                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        target_epoch_ms
-                    ),
-                );
-            }
-
-            let mut calibration_deadline_epoch_ms = None;
-            if calibration_enabled {
-                let calibration = config
-                    .calibration
-                    .as_ref()
-                    .context("Calibration config missing")?;
-                let calibration_deadline =
-                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
-                calibration_deadline_epoch_ms = Some(calibration_deadline);
-                let calibration_start_epoch_ms =
-                    calibration_deadline - calibration.calibration_window_ms as i64;
-                if now_epoch_ms < calibration_start_epoch_ms {
-                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    log_info(
-                        &label,
-                        &format!(
-                            "Waiting {}ms before calibration window (epoch_ms={})",
-                            sleep_ms, calibration_start_epoch_ms
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
-                }
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > calibration_deadline {
-                    log_warn(
-                        &label,
-                        "Too late to calibrate before target_time; proceeding with available data",
+        let total_orders = config.orders.len();
+        let mut handles = Vec::new();
+        for (order_index, order) in config.orders.iter().enumerate() {
+            let config_clone = config.clone();
+            let order_clone = order.clone();
+            let label_clone = label.clone();
+            let handle = tokio::spawn(async move {
+                if let Err(e) = run_mofid_order_scheduled_task(
+                    config_clone,
+                    order_clone,
+                    label_clone.clone(),
+                    order_index,
+                    total_orders,
+                    target_time,
+                    test_mode,
+                    curl_only,
+                )
+                .await
+                {
+                    log_error(
+                        &label_clone,
+                        &format!("Order thread {} stopped: {}", order_index + 1, e),
                     );
                 }
-            }
+            });
+            handles.push(handle);
+        }
 
-            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-                if calibration_enabled {
-                    let summary = mofid::run_calibration(
-                        &config,
-                        &client,
-                        rate_limiter.as_ref(),
-                        calibration_deadline_epoch_ms,
-                    )
-                    .await?;
-                    (
-                        summary.estimated_delay_ms,
-                        config
-                            .calibration
-                            .as_ref()
-                            .map(|calibration| calibration.safety_margin_ms)
-                            .unwrap_or_default(),
-                        summary.last_probe_wall_time,
-                    )
-                } else {
-                    log_info(&label, "Calibration disabled; using zero delay estimate.");
-                    (0, 0, std::time::SystemTime::now())
-                };
-
-            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
-                std::time::UNIX_EPOCH
-                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            )
-            .with_timezone(&Tehran);
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if final_send_epoch_ms <= now_epoch_ms {
-                log_warn(
-                    &label,
-                    "final_send_time has already passed; sending as soon as possible",
-                );
-            }
-
-            if calibration_enabled {
-                let last_probe_epoch_ms = last_probe_wall_time
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_millis() as i64;
-                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
-                if gap_ms < config.batch_delay_ms as i64 {
-                    log_warn(
-                        &label,
-                        &format!(
-                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
-                            gap_ms, config.batch_delay_ms
-                        ),
-                    );
-                }
-            }
-
-            log_info(
-                &label,
-                &format!(
-                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                    target_datetime.format("%H:%M:%S%.3f"),
-                    final_send_time.format("%H:%M:%S%.3f"),
-                    estimated_delay_ms,
-                    safety_margin_ms,
-                    effective_delay_ms
-                ),
-            );
-            log_info(
-                &label,
-                &format!(
-                    "target_epoch_ms={} final_send_epoch_ms={}",
-                    target_epoch_ms, final_send_epoch_ms
-                ),
-            );
-
-            let total_orders = config.orders.len();
-            let mut handles = Vec::new();
-            for (order_index, order) in config.orders.iter().enumerate() {
-                let config_clone = config.clone();
-                let order_clone = order.clone();
-                let label_clone = label.clone();
-                let limiter =
-                    std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
-                let handle = tokio::spawn(async move {
-                    if let Err(e) = run_mofid_order_schedule(
-                        config_clone,
-                        order_clone,
-                        label_clone.clone(),
-                        order_index,
-                        total_orders,
-                        final_send_epoch_ms,
-                        test_mode,
-                        curl_only,
-                        limiter,
-                    )
-                    .await
-                    {
-                        log_error(
-                            &label_clone,
-                            &format!("Order thread {} stopped: {}", order_index + 1, e),
-                        );
-                    }
-                });
-                handles.push(handle);
-            }
-
-            for handle in handles {
-                let _ = handle.await;
-            }
-
-            if test_mode {
-                log_info(&label, "Test mode: exiting after scheduled send");
-                return Ok(());
-            }
+        for handle in handles {
+            let _ = handle.await;
         }
     }
 
@@ -1051,286 +693,6 @@ async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
-#[cfg(any())]
-async fn run_bmi(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str =
-        fs::read_to_string("config_bmi.json").context("Failed to read config_bmi.json")?;
-    let config: bmi::BmiConfig =
-        serde_json::from_str(&config_str).context("Failed to parse config_bmi.json")?;
-    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
-
-    log_info("BMI", "Starting Sarkhati - BMI Bourse Order Sender");
-
-    if config.cookie.is_empty() {
-        anyhow::bail!("Cookie is required for BMI Bourse. Please set 'cookie' in config.json");
-    }
-
-    log_info(
-        "Danayan",
-        &format!(
-            "Cookie auth enabled (preview: {}...)",
-            &config.cookie[..config.cookie.len().min(50)]
-        ),
-    );
-
-    if config.orders.is_empty() {
-        anyhow::bail!("No orders configured in config.json.");
-    }
-
-    if let Some(target_time_str) = &config.target_time {
-        log_info(
-            "BMI",
-            &format!("Scheduled mode enabled for target time {}", target_time_str),
-        );
-        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
-            .context("target_time must be in HH:MM:SS.mmm format")?;
-        let calibration_enabled = config
-            .calibration
-            .as_ref()
-            .map_or(false, |calibration| calibration.enabled);
-        let client = reqwest::Client::new();
-
-        loop {
-            let target_datetime = next_target_datetime(target_time)?;
-            let target_epoch_ms = target_datetime.timestamp_millis();
-            let now_epoch_ms = current_epoch_millis()?;
-            if now_epoch_ms < target_epoch_ms {
-                log_info(
-                    "BMI",
-                    &format!(
-                        "Next target_time={} (epoch_ms={})",
-                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        target_epoch_ms
-                    ),
-                );
-            }
-
-            let mut calibration_deadline_epoch_ms = None;
-            if calibration_enabled {
-                let calibration = config
-                    .calibration
-                    .as_ref()
-                    .context("Calibration config missing")?;
-                let calibration_deadline =
-                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
-                calibration_deadline_epoch_ms = Some(calibration_deadline);
-                let calibration_start_epoch_ms =
-                    calibration_deadline - calibration.calibration_window_ms as i64;
-                if now_epoch_ms < calibration_start_epoch_ms {
-                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    log_info(
-                        "BMI",
-                        &format!(
-                            "Waiting {}ms before calibration window (epoch_ms={})",
-                            sleep_ms, calibration_start_epoch_ms
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
-                }
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > calibration_deadline {
-                    log_warn(
-                        "BMI",
-                        "Too late to calibrate before target_time; proceeding with available data",
-                    );
-                }
-            }
-
-            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-                if calibration_enabled {
-                    let summary = bmi::run_calibration(
-                        &config,
-                        &client,
-                        rate_limiter.as_ref(),
-                        calibration_deadline_epoch_ms,
-                    )
-                    .await?;
-                    (
-                        summary.estimated_delay_ms,
-                        config
-                            .calibration
-                            .as_ref()
-                            .map(|calibration| calibration.safety_margin_ms)
-                            .unwrap_or_default(),
-                        summary.last_probe_wall_time,
-                    )
-                } else {
-                    log_info("BMI", "Calibration disabled; using zero delay estimate.");
-                    (0, 0, std::time::SystemTime::now())
-                };
-
-            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
-                std::time::UNIX_EPOCH
-                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            )
-            .with_timezone(&Tehran);
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if final_send_epoch_ms <= now_epoch_ms {
-                log_warn(
-                    "BMI",
-                    "final_send_time has already passed; sending as soon as possible",
-                );
-            }
-
-            if calibration_enabled {
-                let last_probe_epoch_ms = last_probe_wall_time
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_millis() as i64;
-                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
-                if gap_ms < config.batch_delay_ms as i64 {
-                    log_warn(
-                        "BMI",
-                        &format!(
-                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
-                            gap_ms, config.batch_delay_ms
-                        ),
-                    );
-                }
-            }
-
-            log_info(
-                "BMI",
-                &format!(
-                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                    target_datetime.format("%H:%M:%S%.3f"),
-                    final_send_time.format("%H:%M:%S%.3f"),
-                    estimated_delay_ms,
-                    safety_margin_ms,
-                    effective_delay_ms
-                ),
-            );
-            log_info(
-                "BMI",
-                &format!(
-                    "target_epoch_ms={} final_send_epoch_ms={}",
-                    target_epoch_ms, final_send_epoch_ms
-                ),
-            );
-
-            let mut order_index = 0usize;
-            while order_index < config.orders.len() {
-                let scheduled_epoch_ms =
-                    final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > scheduled_epoch_ms {
-                    log_warn(
-                        "BMI",
-                        &format!(
-                            "Scheduled send time passed by {}ms for order #{}",
-                            now_epoch_ms - scheduled_epoch_ms,
-                            order_index + 1
-                        ),
-                    );
-                }
-                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
-
-                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-                let actual_epoch_us = current_epoch_micros()?;
-                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                log_info(
-                    "BMI",
-                    &format!(
-                        "Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
-                        order_index + 1,
-                        actual_send_time.format("%H:%M:%S%.3f"),
-                        drift_micros,
-                        actual_epoch_us
-                    ),
-                );
-
-                let order = &config.orders[order_index];
-                bmi::send_order(
-                    &config,
-                    order,
-                    test_mode,
-                    curl_only,
-                    Some(rate_limiter.as_ref()),
-                )
-                .await
-                .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
-                order_index += 1;
-            }
-
-            if test_mode {
-                log_info("BMI", "Test mode: exiting after scheduled send");
-                return Ok(());
-            }
-        }
-    }
-
-    log_info(
-        "BMI",
-        &format!("Loaded {} order(s) from config", config.orders.len()),
-    );
-    log_info(
-        "BMI",
-        &format!("Batch delay: {}ms between batches", config.batch_delay_ms),
-    );
-    log_info("BMI", "Starting continuous order sending...");
-
-    let mut batch_number = 0u64;
-    let batch_delay = config.batch_delay_ms;
-
-    loop {
-        batch_number += 1;
-        log_info(
-            "BMI",
-            &format!(
-                "=== Batch #{}: Sending {} orders ===",
-                batch_number,
-                config.orders.len()
-            ),
-        );
-
-        let mut handles = Vec::new();
-        for (index, order) in config.orders.iter().enumerate() {
-            let config_clone = config.clone();
-            let order_clone = order.clone();
-            let batch = batch_number;
-            let is_test = test_mode;
-            let is_curl_only = curl_only;
-
-            let limiter = rate_limiter.clone();
-            let handle = tokio::spawn(async move {
-                match bmi::send_order(
-                    &config_clone,
-                    &order_clone,
-                    is_test,
-                    is_curl_only,
-                    Some(limiter.as_ref()),
-                )
-                .await
-                {
-                    Ok(_) => log_success(
-                        "BMI",
-                        &format!("Batch #{}, Order #{}: Sent successfully", batch, index + 1),
-                    ),
-                    Err(e) => log_error(
-                        "BMI",
-                        &format!("Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
-                    ),
-                }
-            });
-            handles.push(handle);
-        }
-
-        if test_mode {
-            for handle in handles {
-                let _ = handle.await;
-            }
-            log_info("BMI", "Test mode: exiting after one batch");
-            break;
-        }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
-    }
-
-    Ok(())
-}
-
 async fn run_danayan_account(
     config: danayan::DanayanConfig,
     label: String,
@@ -1393,171 +755,36 @@ async fn run_danayan_account(
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
-        let calibration_enabled = config
-            .calibration
-            .as_ref()
-            .map_or(false, |calibration| calibration.enabled);
-        let client = reqwest::Client::new();
-
-        loop {
-            let target_datetime = next_target_datetime(target_time)?;
-            let target_epoch_ms = target_datetime.timestamp_millis();
-            let now_epoch_ms = current_epoch_millis()?;
-            if now_epoch_ms < target_epoch_ms {
-                log_info(
-                    &label,
-                    &format!(
-                        "Next target_time={} (epoch_ms={})",
-                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        target_epoch_ms
-                    ),
-                );
-            }
-
-            let mut calibration_deadline_epoch_ms = None;
-            if calibration_enabled {
-                let calibration = config
-                    .calibration
-                    .as_ref()
-                    .context("Calibration config missing")?;
-                let calibration_deadline =
-                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
-                calibration_deadline_epoch_ms = Some(calibration_deadline);
-                let calibration_start_epoch_ms =
-                    calibration_deadline - calibration.calibration_window_ms as i64;
-                if now_epoch_ms < calibration_start_epoch_ms {
-                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    log_info(
-                        &label,
-                        &format!(
-                            "Waiting {}ms before calibration window (epoch_ms={})",
-                            sleep_ms, calibration_start_epoch_ms
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
-                }
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > calibration_deadline {
-                    log_warn(
-                        &label,
-                        "Too late to calibrate before target_time; proceeding with available data",
+        let total_orders = config.orders.len();
+        let mut handles = Vec::new();
+        for (order_index, order) in config.orders.iter().enumerate() {
+            let config_clone = config.clone();
+            let order_clone = order.clone();
+            let label_clone = label.clone();
+            let handle = tokio::spawn(async move {
+                if let Err(e) = run_danayan_order_scheduled_task(
+                    config_clone,
+                    order_clone,
+                    label_clone.clone(),
+                    order_index,
+                    total_orders,
+                    target_time,
+                    test_mode,
+                    curl_only,
+                )
+                .await
+                {
+                    log_error(
+                        &label_clone,
+                        &format!("Order thread {} stopped: {}", order_index + 1, e),
                     );
                 }
-            }
+            });
+            handles.push(handle);
+        }
 
-            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-                if calibration_enabled {
-                    let summary = danayan::run_calibration(
-                        &config,
-                        &client,
-                        rate_limiter.as_ref(),
-                        calibration_deadline_epoch_ms,
-                    )
-                    .await?;
-                    (
-                        summary.estimated_delay_ms,
-                        config
-                            .calibration
-                            .as_ref()
-                            .map(|calibration| calibration.safety_margin_ms)
-                            .unwrap_or_default(),
-                        summary.last_probe_wall_time,
-                    )
-                } else {
-                    log_info(&label, "Calibration disabled; using zero delay estimate.");
-                    (0, 0, std::time::SystemTime::now())
-                };
-
-            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
-                std::time::UNIX_EPOCH
-                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            )
-            .with_timezone(&Tehran);
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if final_send_epoch_ms <= now_epoch_ms {
-                log_warn(
-                    &label,
-                    "final_send_time has already passed; sending as soon as possible",
-                );
-            }
-
-            if calibration_enabled {
-                let last_probe_epoch_ms = last_probe_wall_time
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_millis() as i64;
-                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
-                if gap_ms < config.batch_delay_ms as i64 {
-                    log_warn(
-                        &label,
-                        &format!(
-                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
-                            gap_ms, config.batch_delay_ms
-                        ),
-                    );
-                }
-            }
-
-            log_info(
-                &label,
-                &format!(
-                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                    target_datetime.format("%H:%M:%S%.3f"),
-                    final_send_time.format("%H:%M:%S%.3f"),
-                    estimated_delay_ms,
-                    safety_margin_ms,
-                    effective_delay_ms
-                ),
-            );
-            log_info(
-                &label,
-                &format!(
-                    "target_epoch_ms={} final_send_epoch_ms={}",
-                    target_epoch_ms, final_send_epoch_ms
-                ),
-            );
-
-            let total_orders = config.orders.len();
-            let mut handles = Vec::new();
-            for (order_index, order) in config.orders.iter().enumerate() {
-                let config_clone = config.clone();
-                let order_clone = order.clone();
-                let label_clone = label.clone();
-                let limiter =
-                    std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
-                let handle = tokio::spawn(async move {
-                    if let Err(e) = run_danayan_order_schedule(
-                        config_clone,
-                        order_clone,
-                        label_clone.clone(),
-                        order_index,
-                        total_orders,
-                        final_send_epoch_ms,
-                        test_mode,
-                        curl_only,
-                        limiter,
-                    )
-                    .await
-                    {
-                        log_error(
-                            &label_clone,
-                            &format!("Order thread {} stopped: {}", order_index + 1, e),
-                        );
-                    }
-                });
-                handles.push(handle);
-            }
-
-            for handle in handles {
-                let _ = handle.await;
-            }
-
-            if test_mode {
-                log_info(&label, "Test mode: exiting after scheduled send");
-                return Ok(());
-            }
+        for handle in handles {
+            let _ = handle.await;
         }
     }
 
@@ -1649,577 +876,6 @@ async fn run_danayan(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
-#[cfg(any())]
-async fn run_ordibehesht(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str = fs::read_to_string("config_ordibehesht.json")
-        .context("Failed to read config_ordibehesht.json")?;
-    let config: ordibehesht::OrdibeheshtConfig =
-        serde_json::from_str(&config_str).context("Failed to parse config_ordibehesht.json")?;
-    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
-
-    log_info(
-        "Ordibehesht",
-        "Starting Sarkhati - Ordibehesht Order Sender",
-    );
-
-    if config.cookie.is_empty() {
-        anyhow::bail!(
-            "Cookie is required for Ordibehesht. Please set 'cookie' in config_ordibehesht.json"
-        );
-    }
-
-    log_info("Ordibehesht", "Using Cookie authentication");
-    log_info(
-        "Ordibehesht",
-        &format!(
-            "Cookie preview: {}...",
-            &config.cookie[..config.cookie.len().min(50)]
-        ),
-    );
-
-    if config.orders.is_empty() {
-        anyhow::bail!("No orders configured in config_ordibehesht.json.");
-    }
-
-    if let Some(target_time_str) = &config.target_time {
-        log_info(
-            "Ordibehesht",
-            &format!("Scheduled mode enabled for target time {}", target_time_str),
-        );
-        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
-            .context("target_time must be in HH:MM:SS.mmm format")?;
-        let calibration_enabled = config
-            .calibration
-            .as_ref()
-            .map_or(false, |calibration| calibration.enabled);
-        let client = reqwest::Client::new();
-
-        loop {
-            let target_datetime = next_target_datetime(target_time)?;
-            let target_epoch_ms = target_datetime.timestamp_millis();
-            let now_epoch_ms = current_epoch_millis()?;
-            if now_epoch_ms < target_epoch_ms {
-                log_info(
-                    "Ordibehesht",
-                    &format!(
-                        "Next target_time={} (epoch_ms={})",
-                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        target_epoch_ms
-                    ),
-                );
-            }
-
-            let mut calibration_deadline_epoch_ms = None;
-            if calibration_enabled {
-                let calibration = config
-                    .calibration
-                    .as_ref()
-                    .context("Calibration config missing")?;
-                let calibration_deadline =
-                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
-                calibration_deadline_epoch_ms = Some(calibration_deadline);
-                let calibration_start_epoch_ms =
-                    calibration_deadline - calibration.calibration_window_ms as i64;
-                if now_epoch_ms < calibration_start_epoch_ms {
-                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    log_info(
-                        "Ordibehesht",
-                        &format!(
-                            "Waiting {}ms before calibration window (epoch_ms={})",
-                            sleep_ms, calibration_start_epoch_ms
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
-                }
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > calibration_deadline {
-                    log_warn(
-                        "Ordibehesht",
-                        "Too late to calibrate before target_time; proceeding with available data",
-                    );
-                }
-            }
-
-            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-                if calibration_enabled {
-                    let summary = ordibehesht::run_calibration(
-                        &config,
-                        &client,
-                        rate_limiter.as_ref(),
-                        calibration_deadline_epoch_ms,
-                    )
-                    .await?;
-                    (
-                        summary.estimated_delay_ms,
-                        config
-                            .calibration
-                            .as_ref()
-                            .map(|calibration| calibration.safety_margin_ms)
-                            .unwrap_or_default(),
-                        summary.last_probe_wall_time,
-                    )
-                } else {
-                    log_info(
-                        "Ordibehesht",
-                        "Calibration disabled; using zero delay estimate.",
-                    );
-                    (0, 0, std::time::SystemTime::now())
-                };
-
-            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
-                std::time::UNIX_EPOCH
-                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            )
-            .with_timezone(&Tehran);
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if final_send_epoch_ms <= now_epoch_ms {
-                log_warn(
-                    "Ordibehesht",
-                    "final_send_time has already passed; sending as soon as possible",
-                );
-            }
-
-            if calibration_enabled {
-                let last_probe_epoch_ms = last_probe_wall_time
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_millis() as i64;
-                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
-                if gap_ms < config.batch_delay_ms as i64 {
-                    log_warn(
-                        "Ordibehesht",
-                        &format!(
-                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
-                            gap_ms, config.batch_delay_ms
-                        ),
-                    );
-                }
-            }
-
-            log_info(
-                "Ordibehesht",
-                &format!(
-                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                    target_datetime.format("%H:%M:%S%.3f"),
-                    final_send_time.format("%H:%M:%S%.3f"),
-                    estimated_delay_ms,
-                    safety_margin_ms,
-                    effective_delay_ms
-                ),
-            );
-            log_info(
-                "Ordibehesht",
-                &format!(
-                    "target_epoch_ms={} final_send_epoch_ms={}",
-                    target_epoch_ms, final_send_epoch_ms
-                ),
-            );
-
-            let mut order_index = 0usize;
-            while order_index < config.orders.len() {
-                let scheduled_epoch_ms =
-                    final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > scheduled_epoch_ms {
-                    log_warn(
-                        "Ordibehesht",
-                        &format!(
-                            "Scheduled send time passed by {}ms for order #{}",
-                            now_epoch_ms - scheduled_epoch_ms,
-                            order_index + 1
-                        ),
-                    );
-                }
-                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
-
-                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-                let actual_epoch_us = current_epoch_micros()?;
-                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                log_info(
-                    "Ordibehesht",
-                    &format!(
-                        "Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
-                        order_index + 1,
-                        actual_send_time.format("%H:%M:%S%.3f"),
-                        drift_micros,
-                        actual_epoch_us
-                    ),
-                );
-
-                let order = &config.orders[order_index];
-                ordibehesht::send_order(
-                    &config,
-                    order,
-                    test_mode,
-                    curl_only,
-                    Some(rate_limiter.as_ref()),
-                )
-                .await
-                .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
-                order_index += 1;
-            }
-
-            if test_mode {
-                log_info("Ordibehesht", "Test mode: exiting after scheduled send");
-                return Ok(());
-            }
-        }
-    }
-
-    log_info(
-        "Ordibehesht",
-        &format!("Loaded {} order(s) from config", config.orders.len()),
-    );
-    log_info(
-        "Ordibehesht",
-        &format!("Batch delay: {}ms between batches", config.batch_delay_ms),
-    );
-    log_info("Ordibehesht", "Starting continuous order sending...");
-
-    let mut batch_number = 0u64;
-    let batch_delay = config.batch_delay_ms;
-
-    loop {
-        batch_number += 1;
-        log_info(
-            "Ordibehesht",
-            &format!(
-                "=== Batch #{}: Sending {} orders ===",
-                batch_number,
-                config.orders.len()
-            ),
-        );
-
-        let mut handles = Vec::new();
-        for (index, order) in config.orders.iter().enumerate() {
-            let config_clone = config.clone();
-            let order_clone = order.clone();
-            let batch = batch_number;
-            let is_test = test_mode;
-            let is_curl_only = curl_only;
-
-            let limiter = rate_limiter.clone();
-            let handle = tokio::spawn(async move {
-                match ordibehesht::send_order(
-                    &config_clone,
-                    &order_clone,
-                    is_test,
-                    is_curl_only,
-                    Some(limiter.as_ref()),
-                )
-                .await
-                {
-                    Ok(_) => log_success(
-                        "Ordibehesht",
-                        &format!("Batch #{}, Order #{}: Sent successfully", batch, index + 1),
-                    ),
-                    Err(e) => log_error(
-                        "Ordibehesht",
-                        &format!("Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
-                    ),
-                }
-            });
-            handles.push(handle);
-        }
-
-        if test_mode {
-            for handle in handles {
-                let _ = handle.await;
-            }
-            log_info("Ordibehesht", "Test mode: exiting after one batch");
-            break;
-        }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
-    }
-
-    Ok(())
-}
-
-#[cfg(any())]
-async fn run_alvand(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str =
-        fs::read_to_string("config_alvand.json").context("Failed to read config_alvand.json")?;
-    let config: alvand::AlvandConfig =
-        serde_json::from_str(&config_str).context("Failed to parse config_alvand.json")?;
-    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
-
-    log_info("Alvand", "Starting Sarkhati - Alvand Order Sender");
-
-    if config.cookie.is_empty() {
-        anyhow::bail!("Cookie is required for Alvand. Please set 'cookie' in config_alvand.json");
-    }
-
-    log_info("Alvand", "Using Cookie authentication");
-    log_info(
-        "Alvand",
-        &format!(
-            "Cookie preview: {}...",
-            &config.cookie[..config.cookie.len().min(50)]
-        ),
-    );
-
-    if config.orders.is_empty() {
-        anyhow::bail!("No orders configured in config_alvand.json.");
-    }
-
-    if let Some(target_time_str) = &config.target_time {
-        log_info(
-            "Alvand",
-            &format!("Scheduled mode enabled for target time {}", target_time_str),
-        );
-        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
-            .context("target_time must be in HH:MM:SS.mmm format")?;
-        let calibration_enabled = config
-            .calibration
-            .as_ref()
-            .map_or(false, |calibration| calibration.enabled);
-        let client = reqwest::Client::new();
-
-        loop {
-            let target_datetime = next_target_datetime(target_time)?;
-            let target_epoch_ms = target_datetime.timestamp_millis();
-            let now_epoch_ms = current_epoch_millis()?;
-            if now_epoch_ms < target_epoch_ms {
-                log_info(
-                    "Alvand",
-                    &format!(
-                        "Next target_time={} (epoch_ms={})",
-                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        target_epoch_ms
-                    ),
-                );
-            }
-
-            let mut calibration_deadline_epoch_ms = None;
-            if calibration_enabled {
-                let calibration = config
-                    .calibration
-                    .as_ref()
-                    .context("Calibration config missing")?;
-                let calibration_deadline =
-                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
-                calibration_deadline_epoch_ms = Some(calibration_deadline);
-                let calibration_start_epoch_ms =
-                    calibration_deadline - calibration.calibration_window_ms as i64;
-                if now_epoch_ms < calibration_start_epoch_ms {
-                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    log_info(
-                        "Alvand",
-                        &format!(
-                            "Waiting {}ms before calibration window (epoch_ms={})",
-                            sleep_ms, calibration_start_epoch_ms
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
-                }
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > calibration_deadline {
-                    log_warn(
-                        "Alvand",
-                        "Too late to calibrate before target_time; proceeding with available data",
-                    );
-                }
-            }
-
-            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-                if calibration_enabled {
-                    let summary = alvand::run_calibration(
-                        &config,
-                        &client,
-                        rate_limiter.as_ref(),
-                        calibration_deadline_epoch_ms,
-                    )
-                    .await?;
-                    (
-                        summary.estimated_delay_ms,
-                        config
-                            .calibration
-                            .as_ref()
-                            .map(|calibration| calibration.safety_margin_ms)
-                            .unwrap_or_default(),
-                        summary.last_probe_wall_time,
-                    )
-                } else {
-                    log_info("Alvand", "Calibration disabled; using zero delay estimate.");
-                    (0, 0, std::time::SystemTime::now())
-                };
-
-            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
-                std::time::UNIX_EPOCH
-                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            )
-            .with_timezone(&Tehran);
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if final_send_epoch_ms <= now_epoch_ms {
-                log_warn(
-                    "Alvand",
-                    "final_send_time has already passed; sending as soon as possible",
-                );
-            }
-
-            if calibration_enabled {
-                let last_probe_epoch_ms = last_probe_wall_time
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_millis() as i64;
-                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
-                if gap_ms < config.batch_delay_ms as i64 {
-                    log_warn(
-                        "Alvand",
-                        &format!(
-                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
-                            gap_ms, config.batch_delay_ms
-                        ),
-                    );
-                }
-            }
-
-            log_info(
-                "Alvand",
-                &format!(
-                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                    target_datetime.format("%H:%M:%S%.3f"),
-                    final_send_time.format("%H:%M:%S%.3f"),
-                    estimated_delay_ms,
-                    safety_margin_ms,
-                    effective_delay_ms
-                ),
-            );
-            log_info(
-                "Alvand",
-                &format!(
-                    "target_epoch_ms={} final_send_epoch_ms={}",
-                    target_epoch_ms, final_send_epoch_ms
-                ),
-            );
-
-            let mut order_index = 0usize;
-            while order_index < config.orders.len() {
-                let scheduled_epoch_ms =
-                    final_send_epoch_ms + order_index as i64 * config.batch_delay_ms as i64;
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > scheduled_epoch_ms {
-                    log_warn(
-                        "Alvand",
-                        &format!(
-                            "Scheduled send time passed by {}ms for order #{}",
-                            now_epoch_ms - scheduled_epoch_ms,
-                            order_index + 1
-                        ),
-                    );
-                }
-                wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
-
-                let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
-                let actual_epoch_us = current_epoch_micros()?;
-                let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
-                log_info(
-                    "Alvand",
-                    &format!(
-                        "Sending scheduled order #{} at {} (drift {}µs, epoch_us={})",
-                        order_index + 1,
-                        actual_send_time.format("%H:%M:%S%.3f"),
-                        drift_micros,
-                        actual_epoch_us
-                    ),
-                );
-
-                let order = &config.orders[order_index];
-                alvand::send_order(
-                    &config,
-                    order,
-                    test_mode,
-                    curl_only,
-                    Some(rate_limiter.as_ref()),
-                )
-                .await
-                .with_context(|| format!("Failed to send scheduled order #{}", order_index + 1))?;
-                order_index += 1;
-            }
-
-            if test_mode {
-                log_info("Alvand", "Test mode: exiting after scheduled send");
-                return Ok(());
-            }
-        }
-    }
-
-    log_info(
-        "Alvand",
-        &format!("Loaded {} order(s) from config", config.orders.len()),
-    );
-    log_info(
-        "Alvand",
-        &format!("Batch delay: {}ms between batches", config.batch_delay_ms),
-    );
-    log_info("Alvand", "Starting continuous order sending...");
-
-    let mut batch_number = 0u64;
-    let batch_delay = config.batch_delay_ms;
-
-    loop {
-        batch_number += 1;
-        log_info(
-            "Alvand",
-            &format!(
-                "=== Batch #{}: Sending {} orders ===",
-                batch_number,
-                config.orders.len()
-            ),
-        );
-
-        let mut handles = Vec::new();
-        for (index, order) in config.orders.iter().enumerate() {
-            let config_clone = config.clone();
-            let order_clone = order.clone();
-            let batch = batch_number;
-            let is_test = test_mode;
-            let is_curl_only = curl_only;
-
-            let limiter = rate_limiter.clone();
-            let handle = tokio::spawn(async move {
-                match alvand::send_order(
-                    &config_clone,
-                    &order_clone,
-                    is_test,
-                    is_curl_only,
-                    Some(limiter.as_ref()),
-                )
-                .await
-                {
-                    Ok(_) => log_success(
-                        "Alvand",
-                        &format!("Batch #{}, Order #{}: Sent successfully", batch, index + 1),
-                    ),
-                    Err(e) => log_error(
-                        "Alvand",
-                        &format!("Batch #{}, Order #{}: Failed - {}", batch, index + 1, e),
-                    ),
-                }
-            });
-            handles.push(handle);
-        }
-
-        if test_mode {
-            // Wait for all tasks to complete in test mode
-            for handle in handles {
-                let _ = handle.await;
-            }
-            log_info("Alvand", "Test mode: exiting after one batch");
-            break;
-        }
-
-        tokio::time::sleep(tokio::time::Duration::from_millis(batch_delay)).await;
-    }
-
-    Ok(())
-}
-
 async fn run_bidar_account(
     config: bidar::BidarConfig,
     label: String,
@@ -2284,186 +940,36 @@ async fn run_bidar_account(
         );
         let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
             .context("target_time must be in HH:MM:SS.mmm format")?;
-        let calibration_enabled = config
-            .calibration
-            .as_ref()
-            .map_or(false, |calibration| calibration.enabled);
-        let client = reqwest::Client::new();
-
-        loop {
-            let target_datetime = next_target_datetime(target_time)?;
-            let target_epoch_ms = target_datetime.timestamp_millis();
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if now_epoch_ms < target_epoch_ms {
-                log_info(
-                    &label,
-                    &format!(
-                        "Next target_time={} (epoch_ms={})",
-                        target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
-                        target_epoch_ms
-                    ),
-                );
-            }
-
-            let mut calibration_deadline_epoch_ms = None;
-            if calibration_enabled {
-                let calibration = config
-                    .calibration
-                    .as_ref()
-                    .context("Calibration config missing")?;
-                let calibration_deadline =
-                    target_epoch_ms - calibration.calibration_start_margin_ms as i64;
-                calibration_deadline_epoch_ms = Some(calibration_deadline);
-                let calibration_start_epoch_ms =
-                    calibration_deadline - calibration.calibration_window_ms as i64;
-                if now_epoch_ms < calibration_start_epoch_ms {
-                    let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
-                    log_info(
-                        &label,
-                        &format!(
-                            "Waiting {}ms before calibration window (epoch_ms={})",
-                            sleep_ms, calibration_start_epoch_ms
-                        ),
-                    );
-                    tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
-                }
-                let now_epoch_ms = current_epoch_millis()?;
-                if now_epoch_ms > calibration_deadline {
-                    log_warn(
-                        &label,
-                        "Too late to calibrate before target_time; proceeding with available data",
+        let total_orders = config.orders.len();
+        let mut handles = Vec::new();
+        for (order_index, order) in config.orders.iter().enumerate() {
+            let config_clone = config.clone();
+            let order_clone = order.clone();
+            let label_clone = label.clone();
+            let handle = tokio::spawn(async move {
+                if let Err(e) = run_bidar_order_scheduled_task(
+                    config_clone,
+                    order_clone,
+                    label_clone.clone(),
+                    order_index,
+                    total_orders,
+                    target_time,
+                    test_mode,
+                    curl_only,
+                )
+                .await
+                {
+                    log_error(
+                        &label_clone,
+                        &format!("Order thread {} stopped: {}", order_index + 1, e),
                     );
                 }
-            }
+            });
+            handles.push(handle);
+        }
 
-            let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-                if calibration_enabled {
-                    let summary = bidar::run_calibration(
-                        &config,
-                        &client,
-                        rate_limiter.as_ref(),
-                        calibration_deadline_epoch_ms,
-                    )
-                    .await?;
-                    let mut estimated_delay_ms = summary.estimated_delay_ms;
-                    match config.delay_model {
-                        bidar::BidarDelayModel::Rtt => {}
-                        bidar::BidarDelayModel::HalfRtt => {
-                            estimated_delay_ms = (estimated_delay_ms + 1) / 2;
-                            log_info(
-                                &label,
-                                &format!(
-                                    "Delay model half_rtt applied, estimate now {}ms",
-                                    estimated_delay_ms
-                                ),
-                            );
-                        }
-                    }
-                    (
-                        estimated_delay_ms,
-                        config
-                            .calibration
-                            .as_ref()
-                            .map(|calibration| calibration.safety_margin_ms)
-                            .unwrap_or_default(),
-                        summary.last_probe_wall_time,
-                    )
-                } else {
-                    log_info(&label, "Calibration disabled; using zero delay estimate.");
-                    (0, 0, std::time::SystemTime::now())
-                };
-
-            let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
-            let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
-            let final_send_time = chrono::DateTime::<chrono::Utc>::from(
-                std::time::UNIX_EPOCH
-                    + std::time::Duration::from_millis(final_send_epoch_ms as u64),
-            )
-            .with_timezone(&Tehran);
-
-            let now_epoch_ms = current_epoch_millis()?;
-            if final_send_epoch_ms <= now_epoch_ms {
-                log_warn(
-                    &label,
-                    "final_send_time has already passed; sending as soon as possible",
-                );
-            }
-
-            if calibration_enabled {
-                let last_probe_epoch_ms = last_probe_wall_time
-                    .duration_since(std::time::UNIX_EPOCH)?
-                    .as_millis() as i64;
-                let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
-                if gap_ms < config.batch_delay_ms as i64 {
-                    log_warn(
-                        &label,
-                        &format!(
-                            "Last probe is too close to final_send_time; gap {}ms < {}ms",
-                            gap_ms, config.batch_delay_ms
-                        ),
-                    );
-                }
-            }
-
-            log_info(
-                &label,
-                &format!(
-                    "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
-                    target_datetime.format("%H:%M:%S%.3f"),
-                    final_send_time.format("%H:%M:%S%.3f"),
-                    estimated_delay_ms,
-                    safety_margin_ms,
-                    effective_delay_ms
-                ),
-            );
-            log_info(
-                &label,
-                &format!(
-                    "target_epoch_ms={} final_send_epoch_ms={}",
-                    target_epoch_ms, final_send_epoch_ms
-                ),
-            );
-
-            let total_orders = config.orders.len();
-            let mut handles = Vec::new();
-            for (order_index, order) in config.orders.iter().enumerate() {
-                let config_clone = config.clone();
-                let order_clone = order.clone();
-                let label_clone = label.clone();
-                let limiter =
-                    std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
-                let handle = tokio::spawn(async move {
-                    if let Err(e) = run_bidar_order_schedule(
-                        config_clone,
-                        order_clone,
-                        label_clone.clone(),
-                        order_index,
-                        total_orders,
-                        final_send_epoch_ms,
-                        test_mode,
-                        curl_only,
-                        limiter,
-                    )
-                    .await
-                    {
-                        log_error(
-                            &label_clone,
-                            &format!("Order thread {} stopped: {}", order_index + 1, e),
-                        );
-                    }
-                });
-                handles.push(handle);
-            }
-
-            for handle in handles {
-                let _ = handle.await;
-            }
-
-            if test_mode {
-                log_info(&label, "Test mode: exiting after scheduled send");
-                return Ok(());
-            }
+        for handle in handles {
+            let _ = handle.await;
         }
     }
 
@@ -2631,6 +1137,158 @@ async fn run_standard_order_schedule(
     Ok(())
 }
 
+async fn run_standard_order_scheduled_task(
+    broker: standard_broker::StandardBrokerConfig,
+    order_json: String,
+    order_index: usize,
+    total_orders: usize,
+    target_time: chrono::NaiveTime,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let calibration_enabled = broker
+        .calibration
+        .as_ref()
+        .map_or(false, |calibration| calibration.enabled);
+    let client = reqwest::Client::new();
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+
+    loop {
+        let target_datetime = next_target_datetime(target_time)?;
+        let target_epoch_ms = target_datetime.timestamp_millis();
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms < target_epoch_ms {
+            log_info(
+                &broker.name,
+                &format!(
+                    "Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                ),
+            );
+        }
+
+        let mut calibration_deadline_epoch_ms = None;
+        if calibration_enabled {
+            let calibration = broker
+                .calibration
+                .as_ref()
+                .context("Calibration config missing")?;
+            let calibration_deadline =
+                target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+            calibration_deadline_epoch_ms = Some(calibration_deadline);
+            let calibration_start_epoch_ms =
+                calibration_deadline - calibration.calibration_window_ms as i64;
+            if now_epoch_ms < calibration_start_epoch_ms {
+                let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                log_info(
+                    &broker.name,
+                    &format!(
+                        "Waiting {}ms before calibration window (epoch_ms={})",
+                        sleep_ms, calibration_start_epoch_ms
+                    ),
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+            }
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms > calibration_deadline {
+                log_warn(
+                    &broker.name,
+                    "Too late to calibrate before target_time; proceeding with available data",
+                );
+            }
+        }
+
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
+            if calibration_enabled {
+                let summary = standard_broker::run_calibration(
+                    &broker,
+                    &client,
+                    rate_limiter.as_ref(),
+                    calibration_deadline_epoch_ms,
+                )
+                .await?;
+                (
+                    summary.estimated_delay_ms,
+                    broker
+                        .calibration
+                        .as_ref()
+                        .map(|calibration| calibration.safety_margin_ms)
+                        .unwrap_or_default(),
+                    summary.last_probe_wall_time,
+                )
+            } else {
+                log_info(
+                    &broker.name,
+                    "Calibration disabled; using zero delay estimate.",
+                );
+                (0, 0, std::time::SystemTime::now())
+            };
+
+        let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+        let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+        let final_send_time = chrono::DateTime::<chrono::Utc>::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(final_send_epoch_ms as u64),
+        )
+        .with_timezone(&Tehran);
+
+        let now_epoch_ms = current_epoch_millis()?;
+        if final_send_epoch_ms <= now_epoch_ms {
+            log_warn(
+                &broker.name,
+                "final_send_time has already passed; sending as soon as possible",
+            );
+        }
+
+        if calibration_enabled {
+            let last_probe_epoch_ms = last_probe_wall_time
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as i64;
+            let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+            if gap_ms < broker.batch_delay_ms as i64 {
+                log_warn(
+                    &broker.name,
+                    &format!(
+                        "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                        gap_ms, broker.batch_delay_ms
+                    ),
+                );
+            }
+        }
+
+        log_info(
+            &broker.name,
+            &format!(
+                "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            ),
+        );
+        log_info(
+            &broker.name,
+            &format!(
+                "target_epoch_ms={} final_send_epoch_ms={}",
+                target_epoch_ms, final_send_epoch_ms
+            ),
+        );
+
+        run_standard_order_schedule(
+            broker.clone(),
+            order_json.clone(),
+            order_index,
+            total_orders,
+            final_send_epoch_ms,
+            test_mode,
+            curl_only,
+            rate_limiter.clone(),
+        )
+        .await?;
+    }
+}
+
 async fn run_standard_order_continuous(
     broker: standard_broker::StandardBrokerConfig,
     order_json: String,
@@ -2764,6 +1422,158 @@ async fn run_exir_order_schedule(
         }
     }
     Ok(())
+}
+
+async fn run_exir_order_scheduled_task(
+    broker: exir_broker::ExirBrokerConfig,
+    order_json: String,
+    order_index: usize,
+    total_orders: usize,
+    target_time: chrono::NaiveTime,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let calibration_enabled = broker
+        .calibration
+        .as_ref()
+        .map_or(false, |calibration| calibration.enabled);
+    let client = reqwest::Client::new();
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+
+    loop {
+        let target_datetime = next_target_datetime(target_time)?;
+        let target_epoch_ms = target_datetime.timestamp_millis();
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms < target_epoch_ms {
+            log_info(
+                &broker.name,
+                &format!(
+                    "Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                ),
+            );
+        }
+
+        let mut calibration_deadline_epoch_ms = None;
+        if calibration_enabled {
+            let calibration = broker
+                .calibration
+                .as_ref()
+                .context("Calibration config missing")?;
+            let calibration_deadline =
+                target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+            calibration_deadline_epoch_ms = Some(calibration_deadline);
+            let calibration_start_epoch_ms =
+                calibration_deadline - calibration.calibration_window_ms as i64;
+            if now_epoch_ms < calibration_start_epoch_ms {
+                let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                log_info(
+                    &broker.name,
+                    &format!(
+                        "Waiting {}ms before calibration window (epoch_ms={})",
+                        sleep_ms, calibration_start_epoch_ms
+                    ),
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+            }
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms > calibration_deadline {
+                log_warn(
+                    &broker.name,
+                    "Too late to calibrate before target_time; proceeding with available data",
+                );
+            }
+        }
+
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
+            if calibration_enabled {
+                let summary = exir_broker::run_calibration(
+                    &broker,
+                    &client,
+                    rate_limiter.as_ref(),
+                    calibration_deadline_epoch_ms,
+                )
+                .await?;
+                (
+                    summary.estimated_delay_ms,
+                    broker
+                        .calibration
+                        .as_ref()
+                        .map(|calibration| calibration.safety_margin_ms)
+                        .unwrap_or_default(),
+                    summary.last_probe_wall_time,
+                )
+            } else {
+                log_info(
+                    &broker.name,
+                    "Calibration disabled; using zero delay estimate.",
+                );
+                (0, 0, std::time::SystemTime::now())
+            };
+
+        let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+        let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+        let final_send_time = chrono::DateTime::<chrono::Utc>::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(final_send_epoch_ms as u64),
+        )
+        .with_timezone(&Tehran);
+
+        let now_epoch_ms = current_epoch_millis()?;
+        if final_send_epoch_ms <= now_epoch_ms {
+            log_warn(
+                &broker.name,
+                "final_send_time has already passed; sending as soon as possible",
+            );
+        }
+
+        if calibration_enabled {
+            let last_probe_epoch_ms = last_probe_wall_time
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as i64;
+            let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+            if gap_ms < broker.batch_delay_ms as i64 {
+                log_warn(
+                    &broker.name,
+                    &format!(
+                        "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                        gap_ms, broker.batch_delay_ms
+                    ),
+                );
+            }
+        }
+
+        log_info(
+            &broker.name,
+            &format!(
+                "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            ),
+        );
+        log_info(
+            &broker.name,
+            &format!(
+                "target_epoch_ms={} final_send_epoch_ms={}",
+                target_epoch_ms, final_send_epoch_ms
+            ),
+        );
+
+        run_exir_order_schedule(
+            broker.clone(),
+            order_json.clone(),
+            order_index,
+            total_orders,
+            final_send_epoch_ms,
+            test_mode,
+            curl_only,
+            rate_limiter.clone(),
+        )
+        .await?;
+    }
 }
 
 async fn run_exir_order_continuous(
@@ -2900,6 +1710,157 @@ async fn run_mofid_order_schedule(
         }
     }
     Ok(())
+}
+
+async fn run_mofid_order_scheduled_task(
+    config: mofid::MofidConfig,
+    order: mofid::MofidOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    target_time: chrono::NaiveTime,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let calibration_enabled = config
+        .calibration
+        .as_ref()
+        .map_or(false, |calibration| calibration.enabled);
+    let client = reqwest::Client::new();
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+
+    loop {
+        let target_datetime = next_target_datetime(target_time)?;
+        let target_epoch_ms = target_datetime.timestamp_millis();
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms < target_epoch_ms {
+            log_info(
+                &label,
+                &format!(
+                    "Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                ),
+            );
+        }
+
+        let mut calibration_deadline_epoch_ms = None;
+        if calibration_enabled {
+            let calibration = config
+                .calibration
+                .as_ref()
+                .context("Calibration config missing")?;
+            let calibration_deadline =
+                target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+            calibration_deadline_epoch_ms = Some(calibration_deadline);
+            let calibration_start_epoch_ms =
+                calibration_deadline - calibration.calibration_window_ms as i64;
+            if now_epoch_ms < calibration_start_epoch_ms {
+                let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                log_info(
+                    &label,
+                    &format!(
+                        "Waiting {}ms before calibration window (epoch_ms={})",
+                        sleep_ms, calibration_start_epoch_ms
+                    ),
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+            }
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms > calibration_deadline {
+                log_warn(
+                    &label,
+                    "Too late to calibrate before target_time; proceeding with available data",
+                );
+            }
+        }
+
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
+            if calibration_enabled {
+                let summary = mofid::run_calibration(
+                    &config,
+                    &client,
+                    rate_limiter.as_ref(),
+                    calibration_deadline_epoch_ms,
+                )
+                .await?;
+                (
+                    summary.estimated_delay_ms,
+                    config
+                        .calibration
+                        .as_ref()
+                        .map(|calibration| calibration.safety_margin_ms)
+                        .unwrap_or_default(),
+                    summary.last_probe_wall_time,
+                )
+            } else {
+                log_info(&label, "Calibration disabled; using zero delay estimate.");
+                (0, 0, std::time::SystemTime::now())
+            };
+
+        let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+        let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+        let final_send_time = chrono::DateTime::<chrono::Utc>::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(final_send_epoch_ms as u64),
+        )
+        .with_timezone(&Tehran);
+
+        let now_epoch_ms = current_epoch_millis()?;
+        if final_send_epoch_ms <= now_epoch_ms {
+            log_warn(
+                &label,
+                "final_send_time has already passed; sending as soon as possible",
+            );
+        }
+
+        if calibration_enabled {
+            let last_probe_epoch_ms = last_probe_wall_time
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as i64;
+            let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+            if gap_ms < config.batch_delay_ms as i64 {
+                log_warn(
+                    &label,
+                    &format!(
+                        "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                        gap_ms, config.batch_delay_ms
+                    ),
+                );
+            }
+        }
+
+        log_info(
+            &label,
+            &format!(
+                "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            ),
+        );
+        log_info(
+            &label,
+            &format!(
+                "target_epoch_ms={} final_send_epoch_ms={}",
+                target_epoch_ms, final_send_epoch_ms
+            ),
+        );
+
+        run_mofid_order_schedule(
+            config.clone(),
+            order.clone(),
+            label.clone(),
+            order_index,
+            total_orders,
+            final_send_epoch_ms,
+            test_mode,
+            curl_only,
+            rate_limiter.clone(),
+        )
+        .await?;
+    }
 }
 
 async fn run_mofid_order_continuous(
@@ -3039,6 +2000,157 @@ async fn run_danayan_order_schedule(
     Ok(())
 }
 
+async fn run_danayan_order_scheduled_task(
+    config: danayan::DanayanConfig,
+    order: danayan::DanayanOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    target_time: chrono::NaiveTime,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let calibration_enabled = config
+        .calibration
+        .as_ref()
+        .map_or(false, |calibration| calibration.enabled);
+    let client = reqwest::Client::new();
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+
+    loop {
+        let target_datetime = next_target_datetime(target_time)?;
+        let target_epoch_ms = target_datetime.timestamp_millis();
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms < target_epoch_ms {
+            log_info(
+                &label,
+                &format!(
+                    "Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                ),
+            );
+        }
+
+        let mut calibration_deadline_epoch_ms = None;
+        if calibration_enabled {
+            let calibration = config
+                .calibration
+                .as_ref()
+                .context("Calibration config missing")?;
+            let calibration_deadline =
+                target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+            calibration_deadline_epoch_ms = Some(calibration_deadline);
+            let calibration_start_epoch_ms =
+                calibration_deadline - calibration.calibration_window_ms as i64;
+            if now_epoch_ms < calibration_start_epoch_ms {
+                let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                log_info(
+                    &label,
+                    &format!(
+                        "Waiting {}ms before calibration window (epoch_ms={})",
+                        sleep_ms, calibration_start_epoch_ms
+                    ),
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+            }
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms > calibration_deadline {
+                log_warn(
+                    &label,
+                    "Too late to calibrate before target_time; proceeding with available data",
+                );
+            }
+        }
+
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
+            if calibration_enabled {
+                let summary = danayan::run_calibration(
+                    &config,
+                    &client,
+                    rate_limiter.as_ref(),
+                    calibration_deadline_epoch_ms,
+                )
+                .await?;
+                (
+                    summary.estimated_delay_ms,
+                    config
+                        .calibration
+                        .as_ref()
+                        .map(|calibration| calibration.safety_margin_ms)
+                        .unwrap_or_default(),
+                    summary.last_probe_wall_time,
+                )
+            } else {
+                log_info(&label, "Calibration disabled; using zero delay estimate.");
+                (0, 0, std::time::SystemTime::now())
+            };
+
+        let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+        let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+        let final_send_time = chrono::DateTime::<chrono::Utc>::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(final_send_epoch_ms as u64),
+        )
+        .with_timezone(&Tehran);
+
+        let now_epoch_ms = current_epoch_millis()?;
+        if final_send_epoch_ms <= now_epoch_ms {
+            log_warn(
+                &label,
+                "final_send_time has already passed; sending as soon as possible",
+            );
+        }
+
+        if calibration_enabled {
+            let last_probe_epoch_ms = last_probe_wall_time
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as i64;
+            let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+            if gap_ms < config.batch_delay_ms as i64 {
+                log_warn(
+                    &label,
+                    &format!(
+                        "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                        gap_ms, config.batch_delay_ms
+                    ),
+                );
+            }
+        }
+
+        log_info(
+            &label,
+            &format!(
+                "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            ),
+        );
+        log_info(
+            &label,
+            &format!(
+                "target_epoch_ms={} final_send_epoch_ms={}",
+                target_epoch_ms, final_send_epoch_ms
+            ),
+        );
+
+        run_danayan_order_schedule(
+            config.clone(),
+            order.clone(),
+            label.clone(),
+            order_index,
+            total_orders,
+            final_send_epoch_ms,
+            test_mode,
+            curl_only,
+            rate_limiter.clone(),
+        )
+        .await?;
+    }
+}
+
 async fn run_danayan_order_continuous(
     config: danayan::DanayanConfig,
     order: danayan::DanayanOrderData,
@@ -3174,6 +2286,172 @@ async fn run_bidar_order_schedule(
         }
     }
     Ok(())
+}
+
+async fn run_bidar_order_scheduled_task(
+    config: bidar::BidarConfig,
+    order: bidar::BidarOrderData,
+    label: String,
+    order_index: usize,
+    total_orders: usize,
+    target_time: chrono::NaiveTime,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let calibration_enabled = config
+        .calibration
+        .as_ref()
+        .map_or(false, |calibration| calibration.enabled);
+    let client = reqwest::Client::new();
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(config.batch_delay_ms));
+
+    loop {
+        let target_datetime = next_target_datetime(target_time)?;
+        let target_epoch_ms = target_datetime.timestamp_millis();
+
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms < target_epoch_ms {
+            log_info(
+                &label,
+                &format!(
+                    "Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                ),
+            );
+        }
+
+        let mut calibration_deadline_epoch_ms = None;
+        if calibration_enabled {
+            let calibration = config
+                .calibration
+                .as_ref()
+                .context("Calibration config missing")?;
+            let calibration_deadline =
+                target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+            calibration_deadline_epoch_ms = Some(calibration_deadline);
+            let calibration_start_epoch_ms =
+                calibration_deadline - calibration.calibration_window_ms as i64;
+            if now_epoch_ms < calibration_start_epoch_ms {
+                let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                log_info(
+                    &label,
+                    &format!(
+                        "Waiting {}ms before calibration window (epoch_ms={})",
+                        sleep_ms, calibration_start_epoch_ms
+                    ),
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+            }
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms > calibration_deadline {
+                log_warn(
+                    &label,
+                    "Too late to calibrate before target_time; proceeding with available data",
+                );
+            }
+        }
+
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
+            if calibration_enabled {
+                let summary = bidar::run_calibration(
+                    &config,
+                    &client,
+                    rate_limiter.as_ref(),
+                    calibration_deadline_epoch_ms,
+                )
+                .await?;
+                let mut estimated_delay_ms = summary.estimated_delay_ms;
+                match config.delay_model {
+                    bidar::BidarDelayModel::Rtt => {}
+                    bidar::BidarDelayModel::HalfRtt => {
+                        estimated_delay_ms = (estimated_delay_ms + 1) / 2;
+                        log_info(
+                            &label,
+                            &format!(
+                                "Delay model half_rtt applied, estimate now {}ms",
+                                estimated_delay_ms
+                            ),
+                        );
+                    }
+                }
+                (
+                    estimated_delay_ms,
+                    config
+                        .calibration
+                        .as_ref()
+                        .map(|calibration| calibration.safety_margin_ms)
+                        .unwrap_or_default(),
+                    summary.last_probe_wall_time,
+                )
+            } else {
+                log_info(&label, "Calibration disabled; using zero delay estimate.");
+                (0, 0, std::time::SystemTime::now())
+            };
+
+        let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+        let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+        let final_send_time = chrono::DateTime::<chrono::Utc>::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(final_send_epoch_ms as u64),
+        )
+        .with_timezone(&Tehran);
+
+        let now_epoch_ms = current_epoch_millis()?;
+        if final_send_epoch_ms <= now_epoch_ms {
+            log_warn(
+                &label,
+                "final_send_time has already passed; sending as soon as possible",
+            );
+        }
+
+        if calibration_enabled {
+            let last_probe_epoch_ms = last_probe_wall_time
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as i64;
+            let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+            if gap_ms < config.batch_delay_ms as i64 {
+                log_warn(
+                    &label,
+                    &format!(
+                        "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                        gap_ms, config.batch_delay_ms
+                    ),
+                );
+            }
+        }
+
+        log_info(
+            &label,
+            &format!(
+                "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            ),
+        );
+        log_info(
+            &label,
+            &format!(
+                "target_epoch_ms={} final_send_epoch_ms={}",
+                target_epoch_ms, final_send_epoch_ms
+            ),
+        );
+
+        run_bidar_order_schedule(
+            config.clone(),
+            order.clone(),
+            label.clone(),
+            order_index,
+            total_orders,
+            final_send_epoch_ms,
+            test_mode,
+            curl_only,
+            rate_limiter.clone(),
+        )
+        .await?;
+    }
 }
 
 async fn run_bidar_order_continuous(

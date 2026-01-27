@@ -2,7 +2,7 @@ use crate::calibration::{self, CalibrationConfig};
 use crate::logging::{log_info, log_raw_stdout};
 use crate::rate_limiter::RateLimiter;
 use anyhow::{Context, Result};
-use chrono::{Timelike, Utc};
+use chrono::Timelike;
 use reqwest::StatusCode;
 use reqwest::header::{
     ACCEPT, ACCEPT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE, COOKIE, HeaderMap, HeaderValue, ORIGIN,
@@ -101,7 +101,7 @@ pub fn find_broker<'a>(config: &'a ExirBrokersConfig, name: &str) -> Option<&'a 
 }
 
 pub fn calculate_x_app_n(nt: &str, url: &str) -> String {
-    let now = Utc::now() - chrono::Duration::seconds(2);
+    let now = crate::time_reference::now_utc() - chrono::Duration::seconds(2);
     let utc_seconds: i64 = (3600 * now.hour() + 60 * now.minute() + now.second()) as i64;
 
     let url_path = if let Some(pos) = url.find("://") {
@@ -242,10 +242,7 @@ pub async fn send_order(
         response_text.clone()
     };
 
-    log_info(
-        &broker.name,
-        &format!("Order response status: {}", status),
-    );
+    log_info(&broker.name, &format!("Order response status: {}", status));
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);
@@ -266,9 +263,13 @@ pub async fn run_calibration(
         .context("Calibration config missing")?;
 
     let prefix = format!("[{}]", broker.name);
-    calibration::run_calibration(&prefix, calibration, rate_limiter, deadline_epoch_ms, || {
-        send_probe(broker, client)
-    })
+    calibration::run_calibration(
+        &prefix,
+        calibration,
+        rate_limiter,
+        deadline_epoch_ms,
+        || send_probe(broker, client),
+    )
     .await
 }
 

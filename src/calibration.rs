@@ -113,8 +113,8 @@ where
     };
 
     let mut rtts_ms = Vec::with_capacity(calibration.probe_count.max(1));
-    let mut last_probe_wall = SystemTime::now();
-    let mut last_wall_time = SystemTime::now();
+    let mut last_probe_wall = crate::time_reference::now_system_time();
+    let mut last_wall_time = crate::time_reference::now_system_time();
 
     log_info(
         broker_label,
@@ -126,7 +126,7 @@ where
 
     for probe_index in 0..max_probes {
         if let Some(deadline_epoch_ms) = deadline_epoch_ms {
-            if SystemTime::now()
+            if crate::time_reference::now_system_time()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|duration| duration.as_millis() as i64 >= deadline_epoch_ms)
                 .unwrap_or(true)
@@ -143,7 +143,7 @@ where
 
         rate_limiter.wait().await;
         if let Some(deadline_epoch_ms) = deadline_epoch_ms {
-            if SystemTime::now()
+            if crate::time_reference::now_system_time()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|duration| duration.as_millis() as i64 >= deadline_epoch_ms)
                 .unwrap_or(true)
@@ -155,7 +155,7 @@ where
                 break;
             }
         }
-        let current_wall = SystemTime::now();
+        let current_wall = crate::time_reference::now_system_time();
         if current_wall < last_wall_time {
             log_warn(
                 broker_label,
@@ -182,7 +182,7 @@ where
                 continue;
             }
         };
-        last_probe_wall = SystemTime::now();
+        last_probe_wall = crate::time_reference::now_system_time();
 
         log_info(
             broker_label,

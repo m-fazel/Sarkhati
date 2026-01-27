@@ -213,10 +213,7 @@ pub async fn send_order(
         response_text.clone()
     };
 
-    log_info(
-        &broker.name,
-        &format!("Order response status: {}", status),
-    );
+    log_info(&broker.name, &format!("Order response status: {}", status));
 
     if !status.is_success() {
         anyhow::bail!("Order failed with status {}: {}", status, decoded_text);
@@ -237,9 +234,13 @@ pub async fn run_calibration(
         .context("Calibration config missing")?;
 
     let prefix = format!("[{}]", broker.name);
-    calibration::run_calibration(&prefix, calibration, rate_limiter, deadline_epoch_ms, || {
-        send_probe(broker, client)
-    })
+    calibration::run_calibration(
+        &prefix,
+        calibration,
+        rate_limiter,
+        deadline_epoch_ms,
+        || send_probe(broker, client),
+    )
     .await
 }
 

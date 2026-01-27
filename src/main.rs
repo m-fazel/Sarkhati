@@ -8,10 +8,12 @@ mod bidar;
 mod calibration;
 mod danayan;
 mod exir_broker;
+mod global_config;
 mod logging;
 mod mofid;
 mod rate_limiter;
 mod standard_broker;
+mod time_reference;
 
 use crate::logging::{log_error, log_info, log_success, log_warn};
 
@@ -72,6 +74,13 @@ async fn main() -> Result<()> {
                 "*** TEST MODE: Will send one order immediately without timers ***",
             );
         }
+    }
+
+    let global_config = global_config::load_config("config_global.json")?;
+    if let Some(config) = global_config.as_ref() {
+        time_reference::initialize(config.ntp.as_ref()).await?;
+    } else {
+        time_reference::initialize(None).await?;
     }
 
     match broker {
@@ -148,7 +157,10 @@ async fn run_standard(test_mode: bool, curl_only: bool) -> Result<()> {
 
     let standard_config = standard_broker::load_config("config_standard.json")?;
     if standard_config.accounts.is_empty() {
-        log_warn("Standard", "No accounts found in config_standard.json; skipping.");
+        log_warn(
+            "Standard",
+            "No accounts found in config_standard.json; skipping.",
+        );
         return Ok(());
     }
 
@@ -1086,7 +1098,7 @@ async fn run_standard_order_schedule(
         }
         wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
 
-        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_send_time = time_reference::now_utc().with_timezone(&Tehran);
         let actual_epoch_us = current_epoch_micros()?;
         let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
         log_info(
@@ -1199,31 +1211,30 @@ async fn run_standard_order_scheduled_task(
             }
         }
 
-        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-            if calibration_enabled {
-                let summary = standard_broker::run_calibration(
-                    &broker,
-                    &client,
-                    rate_limiter.as_ref(),
-                    calibration_deadline_epoch_ms,
-                )
-                .await?;
-                (
-                    summary.estimated_delay_ms,
-                    broker
-                        .calibration
-                        .as_ref()
-                        .map(|calibration| calibration.safety_margin_ms)
-                        .unwrap_or_default(),
-                    summary.last_probe_wall_time,
-                )
-            } else {
-                log_info(
-                    &broker.name,
-                    "Calibration disabled; using zero delay estimate.",
-                );
-                (0, 0, std::time::SystemTime::now())
-            };
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
+            let summary = standard_broker::run_calibration(
+                &broker,
+                &client,
+                rate_limiter.as_ref(),
+                calibration_deadline_epoch_ms,
+            )
+            .await?;
+            (
+                summary.estimated_delay_ms,
+                broker
+                    .calibration
+                    .as_ref()
+                    .map(|calibration| calibration.safety_margin_ms)
+                    .unwrap_or_default(),
+                summary.last_probe_wall_time,
+            )
+        } else {
+            log_info(
+                &broker.name,
+                "Calibration disabled; using zero delay estimate.",
+            );
+            (0, 0, time_reference::now_system_time())
+        };
 
         let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
         let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
@@ -1373,7 +1384,7 @@ async fn run_exir_order_schedule(
         }
         wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
 
-        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_send_time = time_reference::now_utc().with_timezone(&Tehran);
         let actual_epoch_us = current_epoch_micros()?;
         let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
         log_info(
@@ -1486,31 +1497,30 @@ async fn run_exir_order_scheduled_task(
             }
         }
 
-        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-            if calibration_enabled {
-                let summary = exir_broker::run_calibration(
-                    &broker,
-                    &client,
-                    rate_limiter.as_ref(),
-                    calibration_deadline_epoch_ms,
-                )
-                .await?;
-                (
-                    summary.estimated_delay_ms,
-                    broker
-                        .calibration
-                        .as_ref()
-                        .map(|calibration| calibration.safety_margin_ms)
-                        .unwrap_or_default(),
-                    summary.last_probe_wall_time,
-                )
-            } else {
-                log_info(
-                    &broker.name,
-                    "Calibration disabled; using zero delay estimate.",
-                );
-                (0, 0, std::time::SystemTime::now())
-            };
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
+            let summary = exir_broker::run_calibration(
+                &broker,
+                &client,
+                rate_limiter.as_ref(),
+                calibration_deadline_epoch_ms,
+            )
+            .await?;
+            (
+                summary.estimated_delay_ms,
+                broker
+                    .calibration
+                    .as_ref()
+                    .map(|calibration| calibration.safety_margin_ms)
+                    .unwrap_or_default(),
+                summary.last_probe_wall_time,
+            )
+        } else {
+            log_info(
+                &broker.name,
+                "Calibration disabled; using zero delay estimate.",
+            );
+            (0, 0, time_reference::now_system_time())
+        };
 
         let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
         let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
@@ -1661,7 +1671,7 @@ async fn run_mofid_order_schedule(
         }
         wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
 
-        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_send_time = time_reference::now_utc().with_timezone(&Tehran);
         let actual_epoch_us = current_epoch_micros()?;
         let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
         log_info(
@@ -1775,28 +1785,27 @@ async fn run_mofid_order_scheduled_task(
             }
         }
 
-        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-            if calibration_enabled {
-                let summary = mofid::run_calibration(
-                    &config,
-                    &client,
-                    rate_limiter.as_ref(),
-                    calibration_deadline_epoch_ms,
-                )
-                .await?;
-                (
-                    summary.estimated_delay_ms,
-                    config
-                        .calibration
-                        .as_ref()
-                        .map(|calibration| calibration.safety_margin_ms)
-                        .unwrap_or_default(),
-                    summary.last_probe_wall_time,
-                )
-            } else {
-                log_info(&label, "Calibration disabled; using zero delay estimate.");
-                (0, 0, std::time::SystemTime::now())
-            };
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
+            let summary = mofid::run_calibration(
+                &config,
+                &client,
+                rate_limiter.as_ref(),
+                calibration_deadline_epoch_ms,
+            )
+            .await?;
+            (
+                summary.estimated_delay_ms,
+                config
+                    .calibration
+                    .as_ref()
+                    .map(|calibration| calibration.safety_margin_ms)
+                    .unwrap_or_default(),
+                summary.last_probe_wall_time,
+            )
+        } else {
+            log_info(&label, "Calibration disabled; using zero delay estimate.");
+            (0, 0, time_reference::now_system_time())
+        };
 
         let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
         let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
@@ -1949,7 +1958,7 @@ async fn run_danayan_order_schedule(
         }
         wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
 
-        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_send_time = time_reference::now_utc().with_timezone(&Tehran);
         let actual_epoch_us = current_epoch_micros()?;
         let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
         log_info(
@@ -2063,28 +2072,27 @@ async fn run_danayan_order_scheduled_task(
             }
         }
 
-        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-            if calibration_enabled {
-                let summary = danayan::run_calibration(
-                    &config,
-                    &client,
-                    rate_limiter.as_ref(),
-                    calibration_deadline_epoch_ms,
-                )
-                .await?;
-                (
-                    summary.estimated_delay_ms,
-                    config
-                        .calibration
-                        .as_ref()
-                        .map(|calibration| calibration.safety_margin_ms)
-                        .unwrap_or_default(),
-                    summary.last_probe_wall_time,
-                )
-            } else {
-                log_info(&label, "Calibration disabled; using zero delay estimate.");
-                (0, 0, std::time::SystemTime::now())
-            };
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
+            let summary = danayan::run_calibration(
+                &config,
+                &client,
+                rate_limiter.as_ref(),
+                calibration_deadline_epoch_ms,
+            )
+            .await?;
+            (
+                summary.estimated_delay_ms,
+                config
+                    .calibration
+                    .as_ref()
+                    .map(|calibration| calibration.safety_margin_ms)
+                    .unwrap_or_default(),
+                summary.last_probe_wall_time,
+            )
+        } else {
+            log_info(&label, "Calibration disabled; using zero delay estimate.");
+            (0, 0, time_reference::now_system_time())
+        };
 
         let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
         let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
@@ -2237,7 +2245,7 @@ async fn run_bidar_order_schedule(
         }
         wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
 
-        let actual_send_time = chrono::Utc::now().with_timezone(&Tehran);
+        let actual_send_time = time_reference::now_utc().with_timezone(&Tehran);
         let actual_epoch_us = current_epoch_micros()?;
         let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
         log_info(
@@ -2352,42 +2360,41 @@ async fn run_bidar_order_scheduled_task(
             }
         }
 
-        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) =
-            if calibration_enabled {
-                let summary = bidar::run_calibration(
-                    &config,
-                    &client,
-                    rate_limiter.as_ref(),
-                    calibration_deadline_epoch_ms,
-                )
-                .await?;
-                let mut estimated_delay_ms = summary.estimated_delay_ms;
-                match config.delay_model {
-                    bidar::BidarDelayModel::Rtt => {}
-                    bidar::BidarDelayModel::HalfRtt => {
-                        estimated_delay_ms = (estimated_delay_ms + 1) / 2;
-                        log_info(
-                            &label,
-                            &format!(
-                                "Delay model half_rtt applied, estimate now {}ms",
-                                estimated_delay_ms
-                            ),
-                        );
-                    }
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
+            let summary = bidar::run_calibration(
+                &config,
+                &client,
+                rate_limiter.as_ref(),
+                calibration_deadline_epoch_ms,
+            )
+            .await?;
+            let mut estimated_delay_ms = summary.estimated_delay_ms;
+            match config.delay_model {
+                bidar::BidarDelayModel::Rtt => {}
+                bidar::BidarDelayModel::HalfRtt => {
+                    estimated_delay_ms = (estimated_delay_ms + 1) / 2;
+                    log_info(
+                        &label,
+                        &format!(
+                            "Delay model half_rtt applied, estimate now {}ms",
+                            estimated_delay_ms
+                        ),
+                    );
                 }
-                (
-                    estimated_delay_ms,
-                    config
-                        .calibration
-                        .as_ref()
-                        .map(|calibration| calibration.safety_margin_ms)
-                        .unwrap_or_default(),
-                    summary.last_probe_wall_time,
-                )
-            } else {
-                log_info(&label, "Calibration disabled; using zero delay estimate.");
-                (0, 0, std::time::SystemTime::now())
-            };
+            }
+            (
+                estimated_delay_ms,
+                config
+                    .calibration
+                    .as_ref()
+                    .map(|calibration| calibration.safety_margin_ms)
+                    .unwrap_or_default(),
+                summary.last_probe_wall_time,
+            )
+        } else {
+            log_info(&label, "Calibration disabled; using zero delay estimate.");
+            (0, 0, time_reference::now_system_time())
+        };
 
         let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
         let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
@@ -2511,7 +2518,7 @@ async fn run_bidar_order_continuous(
 }
 
 fn next_target_datetime(target_time: chrono::NaiveTime) -> Result<chrono::DateTime<chrono_tz::Tz>> {
-    let now = chrono::Utc::now().with_timezone(&Tehran);
+    let now = time_reference::now_utc().with_timezone(&Tehran);
     let today = now.date_naive();
     let candidate = Tehran
         .from_local_datetime(&today.and_time(target_time))
@@ -2525,14 +2532,14 @@ fn next_target_datetime(target_time: chrono::NaiveTime) -> Result<chrono::DateTi
 }
 
 fn current_epoch_millis() -> Result<i64> {
-    let now = std::time::SystemTime::now()
+    let now = time_reference::now_system_time()
         .duration_since(std::time::UNIX_EPOCH)
         .context("System time is before UNIX_EPOCH")?;
     Ok(now.as_millis() as i64)
 }
 
 fn current_epoch_micros() -> Result<i128> {
-    let now = std::time::SystemTime::now()
+    let now = time_reference::now_system_time()
         .duration_since(std::time::UNIX_EPOCH)
         .context("System time is before UNIX_EPOCH")?;
     Ok(now.as_micros() as i128)

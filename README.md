@@ -46,6 +46,9 @@ cp config_exir.example.json config_exir.json
 
 # For Bidar Trader
 cp config_bidar.example.json config_bidar.json
+
+# Optional global config (NTP time reference)
+cp config_global.example.json config_global.json
 ```
 
 ### 2. Get your authentication credentials
@@ -81,6 +84,20 @@ Press `Ctrl+C` to stop.
 ---
 
 ## Configuration
+
+### Global Settings (`config_global.json`)
+
+Use this optional file to define shared settings, including the NTP server used to correct the
+system clock reference for scheduled orders.
+
+```json
+{
+  "ntp": {
+    "server": "pool.ntp.org",
+    "timeout_ms": 1000
+  }
+}
+```
 
 ### Mofid Online (`config_mofid.json`)
 

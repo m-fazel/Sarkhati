@@ -1,0 +1,6 @@
+{
+  "ntp": {
+    "server": "pool.ntp.org",
+    "timeout_ms": 1000
+  }
+}

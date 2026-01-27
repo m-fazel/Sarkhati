@@ -237,9 +237,13 @@ pub async fn run_calibration(
         .as_ref()
         .context("Calibration config missing")?;
 
-    calibration::run_calibration("[Mofid]", calibration, rate_limiter, deadline_epoch_ms, || {
-        send_probe(client, config)
-    })
+    calibration::run_calibration(
+        "[Mofid]",
+        calibration,
+        rate_limiter,
+        deadline_epoch_ms,
+        || send_probe(client, config),
+    )
     .await
 }
 

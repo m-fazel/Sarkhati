@@ -106,7 +106,7 @@ pub async fn send_order(
                 .unwrap_or(&config.authorization);
 
             let auth_value = format!("Bearer {}", token);
-            format!("-H 'Authorization: Bearer {}'", auth_value)
+            format!("-H 'Authorization: {}'", auth_value)
         };
         log_info("Mofid", "Equivalent curl command:");
         log_raw_stdout(&format!(

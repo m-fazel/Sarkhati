@@ -1309,11 +1309,17 @@ async fn run_standard_order_continuous(
     curl_only: bool,
     rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
 ) -> Result<()> {
+    let mut last_start: Option<std::time::Instant> = None;
     loop {
         for repeat_index in 0..broker.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(broker.batch_delay_ms)).await;
+            if let Some(previous_start) = last_start {
+                let elapsed = previous_start.elapsed();
+                let delay = std::time::Duration::from_millis(broker.batch_delay_ms);
+                if elapsed < delay {
+                    tokio::time::sleep(delay - elapsed).await;
+                }
             }
+            last_start = Some(std::time::Instant::now());
 
             match standard_broker::send_order(
                 &broker,
@@ -1595,11 +1601,17 @@ async fn run_exir_order_continuous(
     curl_only: bool,
     rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
 ) -> Result<()> {
+    let mut last_start: Option<std::time::Instant> = None;
     loop {
         for repeat_index in 0..broker.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(broker.batch_delay_ms)).await;
+            if let Some(previous_start) = last_start {
+                let elapsed = previous_start.elapsed();
+                let delay = std::time::Duration::from_millis(broker.batch_delay_ms);
+                if elapsed < delay {
+                    tokio::time::sleep(delay - elapsed).await;
+                }
             }
+            last_start = Some(std::time::Instant::now());
 
             match exir_broker::send_order(
                 &broker,
@@ -1882,11 +1894,17 @@ async fn run_mofid_order_continuous(
     curl_only: bool,
     rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
 ) -> Result<()> {
+    let mut last_start: Option<std::time::Instant> = None;
     loop {
         for repeat_index in 0..config.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(config.batch_delay_ms)).await;
+            if let Some(previous_start) = last_start {
+                let elapsed = previous_start.elapsed();
+                let delay = std::time::Duration::from_millis(config.batch_delay_ms);
+                if elapsed < delay {
+                    tokio::time::sleep(delay - elapsed).await;
+                }
             }
+            last_start = Some(std::time::Instant::now());
 
             match mofid::send_order(
                 &config,
@@ -2169,11 +2187,17 @@ async fn run_danayan_order_continuous(
     curl_only: bool,
     rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
 ) -> Result<()> {
+    let mut last_start: Option<std::time::Instant> = None;
     loop {
         for repeat_index in 0..config.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(config.batch_delay_ms)).await;
+            if let Some(previous_start) = last_start {
+                let elapsed = previous_start.elapsed();
+                let delay = std::time::Duration::from_millis(config.batch_delay_ms);
+                if elapsed < delay {
+                    tokio::time::sleep(delay - elapsed).await;
+                }
             }
+            last_start = Some(std::time::Instant::now());
 
             match danayan::send_order(
                 &config,
@@ -2471,11 +2495,17 @@ async fn run_bidar_order_continuous(
     curl_only: bool,
     rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
 ) -> Result<()> {
+    let mut last_start: Option<std::time::Instant> = None;
     loop {
         for repeat_index in 0..config.batch_repeat {
-            if repeat_index > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(config.batch_delay_ms)).await;
+            if let Some(previous_start) = last_start {
+                let elapsed = previous_start.elapsed();
+                let delay = std::time::Duration::from_millis(config.batch_delay_ms);
+                if elapsed < delay {
+                    tokio::time::sleep(delay - elapsed).await;
+                }
             }
+            last_start = Some(std::time::Instant::now());
 
             match bidar::send_order(
                 &config,

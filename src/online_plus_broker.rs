@@ -23,20 +23,22 @@ pub fn default_batch_repeat() -> usize {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct StandardBrokersConfig {
-    pub accounts: Vec<StandardBrokerConfig>,
+pub struct OnlinePlusBrokersConfig {
+    pub accounts: Vec<OnlinePlusBrokerConfig>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum StandardBrokersConfigFile {
-    Single(StandardBrokerConfig),
-    Multiple { accounts: Vec<StandardBrokerConfig> },
-    List(Vec<StandardBrokerConfig>),
+pub enum OnlinePlusBrokersConfigFile {
+    Single(OnlinePlusBrokerConfig),
+    Multiple {
+        accounts: Vec<OnlinePlusBrokerConfig>,
+    },
+    List(Vec<OnlinePlusBrokerConfig>),
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct StandardBrokerConfig {
+pub struct OnlinePlusBrokerConfig {
     pub name: String,
     pub cookie: String,
     #[serde(default = "default_user_agent")]
@@ -44,7 +46,7 @@ pub struct StandardBrokerConfig {
     pub order_url: String,
     pub origin: String,
     pub referer: String,
-    pub orders: Vec<StandardOrderData>,
+    pub orders: Vec<OnlinePlusOrderData>,
     #[serde(default = "default_batch_delay")]
     pub batch_delay_ms: u64,
     #[serde(default = "default_batch_repeat")]
@@ -56,7 +58,7 @@ pub struct StandardBrokerConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct StandardOrderData {
+pub struct OnlinePlusOrderData {
     #[serde(rename = "IsSymbolCautionAgreement")]
     pub is_symbol_caution_agreement: bool,
     #[serde(rename = "CautionAgreementSelected")]
@@ -90,23 +92,23 @@ pub struct StandardOrderData {
     pub short_sell_incentive_percent: i32,
 }
 
-pub fn load_config(path: &str) -> Result<StandardBrokersConfig> {
+pub fn load_config(path: &str) -> Result<OnlinePlusBrokersConfig> {
     let config_str =
         std::fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
-    let config_file: StandardBrokersConfigFile =
+    let config_file: OnlinePlusBrokersConfigFile =
         serde_json::from_str(&config_str).with_context(|| format!("Failed to parse {}", path))?;
     let accounts = match config_file {
-        StandardBrokersConfigFile::Single(config) => vec![config],
-        StandardBrokersConfigFile::Multiple { accounts } => accounts,
-        StandardBrokersConfigFile::List(accounts) => accounts,
+        OnlinePlusBrokersConfigFile::Single(config) => vec![config],
+        OnlinePlusBrokersConfigFile::Multiple { accounts } => accounts,
+        OnlinePlusBrokersConfigFile::List(accounts) => accounts,
     };
-    Ok(StandardBrokersConfig { accounts })
+    Ok(OnlinePlusBrokersConfig { accounts })
 }
 
 pub fn find_broker<'a>(
-    config: &'a StandardBrokersConfig,
+    config: &'a OnlinePlusBrokersConfig,
     name: &str,
-) -> Option<&'a StandardBrokerConfig> {
+) -> Option<&'a OnlinePlusBrokerConfig> {
     config
         .accounts
         .iter()
@@ -114,7 +116,7 @@ pub fn find_broker<'a>(
 }
 
 pub async fn send_order(
-    broker: &StandardBrokerConfig,
+    broker: &OnlinePlusBrokerConfig,
     order_json: &str,
     test_mode: bool,
     curl_only: bool,
@@ -223,7 +225,7 @@ pub async fn send_order(
 }
 
 pub async fn run_calibration(
-    broker: &StandardBrokerConfig,
+    broker: &OnlinePlusBrokerConfig,
     client: &reqwest::Client,
     rate_limiter: &RateLimiter,
     deadline_epoch_ms: Option<i64>,
@@ -245,7 +247,7 @@ pub async fn run_calibration(
 }
 
 async fn send_probe(
-    broker: &StandardBrokerConfig,
+    broker: &OnlinePlusBrokerConfig,
     client: &reqwest::Client,
 ) -> Result<(u64, u128, StatusCode)> {
     let t0 = Instant::now();

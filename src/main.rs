@@ -7,12 +7,13 @@ use std::fs;
 mod bidar;
 mod calibration;
 mod danayan;
+mod easy_trader;
 mod exir_broker;
 mod global_config;
 mod logging;
-mod mofid;
+mod mofid_online_plus;
+mod online_plus_broker;
 mod rate_limiter;
-mod standard_broker;
 mod time_reference;
 
 use crate::logging::{log_error, log_info, log_success, log_warn};
@@ -31,13 +32,13 @@ async fn main() -> Result<()> {
             log_error(
                 "CLI",
                 &format!(
-                    "Usage: {} <mofid|danayan|bidar|standard|exir|all|BROKER_NAME> [test] [curl]",
+                    "Usage: {} <mofid_online_plus|danayan|bidar|online_plus|easy_trader|exir|all|BROKER_NAME> [test] [curl]",
                     args[0]
                 ),
             );
             log_error(
                 "CLI",
-                "BROKER_NAME comes from config_standard.json or config_exir.json.",
+                "BROKER_NAME comes from config_online_plus.json, config_easy_trader.json, or config_exir.json.",
             );
             log_error(
                 "CLI",
@@ -50,13 +51,13 @@ async fn main() -> Result<()> {
             log_error(
                 "CLI",
                 &format!(
-                    "Usage: {} <mofid|danayan|bidar|standard|exir|all|BROKER_NAME> [test] [curl]",
+                    "Usage: {} <mofid_online_plus|danayan|bidar|online_plus|easy_trader|exir|all|BROKER_NAME> [test] [curl]",
                     args[0]
                 ),
             );
             log_error(
                 "CLI",
-                "BROKER_NAME comes from config_standard.json or config_exir.json.",
+                "BROKER_NAME comes from config_online_plus.json, config_easy_trader.json, or config_exir.json.",
             );
             std::process::exit(1);
         }
@@ -84,15 +85,19 @@ async fn main() -> Result<()> {
     }
 
     match broker {
-        "mofid" => run_mofid(test_mode, curl_only).await,
+        "mofid_online_plus" => run_mofid_online_plus(test_mode, curl_only).await,
         "danayan" => run_danayan(test_mode, curl_only).await,
         "bidar" => run_bidar(test_mode, curl_only).await,
-        "standard" => run_standard(test_mode, curl_only).await,
+        "online_plus" => run_online_plus(test_mode, curl_only).await,
+        "easy_trader" => run_easy_trader(test_mode, curl_only).await,
         "exir" => run_exir(test_mode, curl_only).await,
         "all" => run_all(test_mode, curl_only).await,
-        other => match run_standard_broker_by_name(other, test_mode, curl_only).await {
+        other => match run_online_plus_broker_by_name(other, test_mode, curl_only).await {
             Ok(()) => Ok(()),
-            Err(_) => run_exir_broker_by_name(other, test_mode, curl_only).await,
+            Err(_) => match run_easy_trader_broker_by_name(other, test_mode, curl_only).await {
+                Ok(()) => Ok(()),
+                Err(_) => run_exir_broker_by_name(other, test_mode, curl_only).await,
+            },
         },
     }
 }
@@ -100,12 +105,13 @@ async fn main() -> Result<()> {
 async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     log_info("System", "Starting Sarkhati - All Brokers in Parallel");
 
-    let standard_config = standard_broker::load_config("config_standard.json")?;
+    let standard_config = online_plus_broker::load_config("config_online_plus.json")?;
+    let easy_trader_config = easy_trader::load_config("config_easy_trader.json")?;
     let exir_config = exir_broker::load_config("config_exir.json")?;
 
     let mofid_handle = tokio::spawn(async move {
-        if let Err(e) = run_mofid(test_mode, curl_only).await {
-            log_error("Mofid", &format!("Stopped with error: {}", e));
+        if let Err(e) = run_mofid_online_plus(test_mode, curl_only).await {
+            log_error("MofidOnlinePlus", &format!("Stopped with error: {}", e));
         }
     });
 
@@ -124,11 +130,21 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     let mut standard_handles = Vec::new();
     for broker in standard_config.accounts.clone() {
         let handle = tokio::spawn(async move {
-            if let Err(e) = run_standard_broker(broker, test_mode, curl_only).await {
-                log_error("Standard", &format!("Stopped with error: {}", e));
+            if let Err(e) = run_online_plus_broker(broker, test_mode, curl_only).await {
+                log_error("OnlinePlus", &format!("Stopped with error: {}", e));
             }
         });
         standard_handles.push(handle);
+    }
+
+    let mut easy_trader_handles = Vec::new();
+    for broker in easy_trader_config.accounts.clone() {
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_easy_trader_broker(broker, test_mode, curl_only).await {
+                log_error("EasyTrader", &format!("Stopped with error: {}", e));
+            }
+        });
+        easy_trader_handles.push(handle);
     }
 
     let mut exir_handles = Vec::new();
@@ -145,6 +161,9 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     for handle in standard_handles {
         let _ = handle.await;
     }
+    for handle in easy_trader_handles {
+        let _ = handle.await;
+    }
     for handle in exir_handles {
         let _ = handle.await;
     }
@@ -152,14 +171,14 @@ async fn run_all(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_standard(test_mode: bool, curl_only: bool) -> Result<()> {
-    log_info("Standard", "Starting Sarkhati - Standard Brokers");
+async fn run_online_plus(test_mode: bool, curl_only: bool) -> Result<()> {
+    log_info("OnlinePlus", "Starting Sarkhati - Online Plus Brokers");
 
-    let standard_config = standard_broker::load_config("config_standard.json")?;
+    let standard_config = online_plus_broker::load_config("config_online_plus.json")?;
     if standard_config.accounts.is_empty() {
         log_warn(
-            "Standard",
-            "No accounts found in config_standard.json; skipping.",
+            "OnlinePlus",
+            "No accounts found in config_online_plus.json; skipping.",
         );
         return Ok(());
     }
@@ -167,8 +186,8 @@ async fn run_standard(test_mode: bool, curl_only: bool) -> Result<()> {
     let mut handles = Vec::new();
     for broker in standard_config.accounts {
         let handle = tokio::spawn(async move {
-            if let Err(e) = run_standard_broker(broker, test_mode, curl_only).await {
-                log_error("Standard", &format!("Stopped with error: {}", e));
+            if let Err(e) = run_online_plus_broker(broker, test_mode, curl_only).await {
+                log_error("OnlinePlus", &format!("Stopped with error: {}", e));
             }
         });
         handles.push(handle);
@@ -207,12 +226,45 @@ async fn run_exir(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_standard_broker_by_name(name: &str, test_mode: bool, curl_only: bool) -> Result<()> {
-    let config = standard_broker::load_config("config_standard.json")?;
-    let broker = standard_broker::find_broker(&config, name)
+async fn run_easy_trader(test_mode: bool, curl_only: bool) -> Result<()> {
+    log_info("EasyTrader", "Starting Sarkhati - Easy Trader Brokers");
+
+    let easy_trader_config = easy_trader::load_config("config_easy_trader.json")?;
+    if easy_trader_config.accounts.is_empty() {
+        log_warn(
+            "EasyTrader",
+            "No accounts found in config_easy_trader.json; skipping.",
+        );
+        return Ok(());
+    }
+
+    let mut handles = Vec::new();
+    for broker in easy_trader_config.accounts {
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_easy_trader_broker(broker, test_mode, curl_only).await {
+                log_error("EasyTrader", &format!("Stopped with error: {}", e));
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
+}
+
+async fn run_online_plus_broker_by_name(
+    name: &str,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let config = online_plus_broker::load_config("config_online_plus.json")?;
+    let broker = online_plus_broker::find_broker(&config, name)
         .cloned()
-        .with_context(|| format!("Broker '{}' not found in config_standard.json", name))?;
-    run_standard_broker(broker, test_mode, curl_only).await
+        .with_context(|| format!("Broker '{}' not found in config_online_plus.json", name))?;
+    run_online_plus_broker(broker, test_mode, curl_only).await
 }
 
 async fn run_exir_broker_by_name(name: &str, test_mode: bool, curl_only: bool) -> Result<()> {
@@ -223,8 +275,20 @@ async fn run_exir_broker_by_name(name: &str, test_mode: bool, curl_only: bool) -
     run_exir_broker(broker, test_mode, curl_only).await
 }
 
-async fn run_standard_broker(
-    broker: standard_broker::StandardBrokerConfig,
+async fn run_easy_trader_broker_by_name(
+    name: &str,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let config = easy_trader::load_config("config_easy_trader.json")?;
+    let broker = easy_trader::find_broker(&config, name)
+        .cloned()
+        .with_context(|| format!("Broker '{}' not found in config_easy_trader.json", name))?;
+    run_easy_trader_broker(broker, test_mode, curl_only).await
+}
+
+async fn run_online_plus_broker(
+    broker: online_plus_broker::OnlinePlusBrokerConfig,
     test_mode: bool,
     curl_only: bool,
 ) -> Result<()> {
@@ -237,7 +301,7 @@ async fn run_standard_broker(
 
     if broker.cookie.is_empty() {
         anyhow::bail!(
-            "Cookie is required for {}. Please set 'cookie' in config_standard.json",
+            "Cookie is required for {}. Please set 'cookie' in config_online_plus.json",
             broker.name
         );
     }
@@ -269,7 +333,7 @@ async fn run_standard_broker(
             .first()
             .context("No orders available for test mode")?;
         let order_json = serde_json::to_string(order)?;
-        standard_broker::send_order(
+        online_plus_broker::send_order(
             &broker,
             &order_json,
             test_mode,
@@ -295,7 +359,7 @@ async fn run_standard_broker(
             let order_json = serde_json::to_string(order)?;
             let broker_name = broker.name.clone();
             let handle = tokio::spawn(async move {
-                if let Err(e) = run_standard_order_scheduled_task(
+                if let Err(e) = run_online_plus_order_scheduled_task(
                     broker_clone,
                     order_json,
                     order_index,
@@ -341,7 +405,7 @@ async fn run_standard_broker(
         let broker_name = broker.name.clone();
         let limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
         let handle = tokio::spawn(async move {
-            if let Err(e) = run_standard_order_continuous(
+            if let Err(e) = run_online_plus_order_continuous(
                 broker_clone,
                 order_json,
                 order_index,
@@ -513,8 +577,157 @@ async fn run_exir_broker(
     Ok(())
 }
 
-async fn run_mofid_account(
-    config: mofid::MofidConfig,
+async fn run_easy_trader_broker(
+    broker: easy_trader::EasyTraderBrokerConfig,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+
+    log_info(
+        &broker.name,
+        &format!("Starting Sarkhati - {} Order Sender", broker.name),
+    );
+
+    if broker.authorization.is_empty() {
+        anyhow::bail!(
+            "Authorization token is required for {}. Please set 'authorization' in config_easy_trader.json",
+            broker.name
+        );
+    }
+
+    let token = broker
+        .authorization
+        .strip_prefix("Bearer ")
+        .unwrap_or(&broker.authorization);
+
+    log_info(
+        &broker.name,
+        &format!(
+            "Bearer auth enabled (preview: {}...)",
+            &token[..token.len().min(50)]
+        ),
+    );
+
+    if broker.orders.is_empty() {
+        log_warn(&broker.name, "No orders configured; skipping.");
+        return Ok(());
+    }
+    if broker.batch_repeat == 0 {
+        log_warn(&broker.name, "batch_repeat is 0; skipping.");
+        return Ok(());
+    }
+
+    if test_mode {
+        log_info(
+            &broker.name,
+            "Test mode: sending one order immediately without scheduling.",
+        );
+        let order = broker
+            .orders
+            .first()
+            .context("No orders available for test mode")?;
+        easy_trader::send_order(
+            &broker,
+            order,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        .with_context(|| format!("Failed to send test order for {}", broker.name))?;
+        return Ok(());
+    }
+
+    if let Some(target_time_str) = &broker.target_time {
+        log_info(
+            &broker.name,
+            &format!("Scheduled mode enabled for target time {}", target_time_str),
+        );
+        let target_time = chrono::NaiveTime::parse_from_str(target_time_str, "%H:%M:%S%.3f")
+            .context("target_time must be in HH:MM:SS.mmm format")?;
+        let total_orders = broker.orders.len();
+        let mut handles = Vec::new();
+        for (order_index, order) in broker.orders.iter().enumerate() {
+            let broker_clone = broker.clone();
+            let order_clone = order.clone();
+            let broker_name = broker.name.clone();
+            let handle = tokio::spawn(async move {
+                if let Err(e) = run_easy_trader_order_scheduled_task(
+                    broker_clone,
+                    order_clone,
+                    order_index,
+                    total_orders,
+                    target_time,
+                    test_mode,
+                    curl_only,
+                )
+                .await
+                {
+                    log_error(
+                        &broker_name,
+                        &format!("Order thread {} stopped: {}", order_index + 1, e),
+                    );
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            let _ = handle.await;
+        }
+    }
+
+    log_info(
+        &broker.name,
+        &format!("Loaded {} order(s)", broker.orders.len()),
+    );
+    log_info(
+        &broker.name,
+        &format!(
+            "Batch repeat: {} (delay {}ms between repeats)",
+            broker.batch_repeat, broker.batch_delay_ms
+        ),
+    );
+    log_info(&broker.name, "Starting continuous order sending...");
+
+    let total_orders = broker.orders.len();
+    let mut handles = Vec::new();
+    for (order_index, order) in broker.orders.iter().enumerate() {
+        let broker_clone = broker.clone();
+        let order_clone = order.clone();
+        let broker_name = broker.name.clone();
+        let limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_easy_trader_order_continuous(
+                broker_clone,
+                order_clone,
+                order_index,
+                total_orders,
+                test_mode,
+                curl_only,
+                limiter,
+            )
+            .await
+            {
+                log_error(
+                    &broker_name,
+                    &format!("Order thread {} stopped: {}", order_index + 1, e),
+                );
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    Ok(())
+}
+
+async fn run_mofid_online_plus_account(
+    config: mofid_online_plus::MofidOnlinePlusConfig,
     label: String,
     test_mode: bool,
     curl_only: bool,
@@ -569,7 +782,7 @@ async fn run_mofid_account(
             .orders
             .first()
             .context("No orders available for test mode")?;
-        mofid::send_order(
+        mofid_online_plus::send_order(
             &config,
             order,
             test_mode,
@@ -667,31 +880,37 @@ async fn run_mofid_account(
     Ok(())
 }
 
-async fn run_mofid(test_mode: bool, curl_only: bool) -> Result<()> {
-    let config_str =
-        fs::read_to_string("config_mofid.json").context("Failed to read config_mofid.json")?;
-    let config_file: mofid::MofidConfigFile =
-        serde_json::from_str(&config_str).context("Failed to parse config_mofid.json")?;
+async fn run_mofid_online_plus(test_mode: bool, curl_only: bool) -> Result<()> {
+    let config_str = fs::read_to_string("config_mofid_online_plus.json")
+        .context("Failed to read config_mofid_online_plus.json")?;
+    let config_file: mofid_online_plus::MofidOnlinePlusConfigFile =
+        serde_json::from_str(&config_str)
+            .context("Failed to parse config_mofid_online_plus.json")?;
     let accounts = match config_file {
-        mofid::MofidConfigFile::Single(config) => vec![config],
-        mofid::MofidConfigFile::Multiple { accounts } => accounts,
-        mofid::MofidConfigFile::List(accounts) => accounts,
+        mofid_online_plus::MofidOnlinePlusConfigFile::Single(config) => vec![config],
+        mofid_online_plus::MofidOnlinePlusConfigFile::Multiple { accounts } => accounts,
+        mofid_online_plus::MofidOnlinePlusConfigFile::List(accounts) => accounts,
     };
 
     if accounts.is_empty() {
-        log_warn("Mofid", "No accounts found in config_mofid.json; skipping.");
+        log_warn(
+            "MofidOnlinePlus",
+            "No accounts found in config_mofid_online_plus.json; skipping.",
+        );
         return Ok(());
     }
 
     let mut handles = Vec::new();
     for (index, mut account) in accounts.into_iter().enumerate() {
-        let fallback_label = format!("Mofid#{}", index + 1);
+        let fallback_label = format!("MofidOnlinePlus#{}", index + 1);
         let label = account.display_name(&fallback_label);
         if account.name.is_none() {
             account.name = Some(label.clone());
         }
         let handle = tokio::spawn(async move {
-            if let Err(e) = run_mofid_account(account, label.clone(), test_mode, curl_only).await {
+            if let Err(e) =
+                run_mofid_online_plus_account(account, label.clone(), test_mode, curl_only).await
+            {
                 log_error(&label, &format!("Stopped with error: {}", e));
             }
         });
@@ -1069,8 +1288,8 @@ async fn run_bidar(test_mode: bool, curl_only: bool) -> Result<()> {
     Ok(())
 }
 
-async fn run_standard_order_schedule(
-    broker: standard_broker::StandardBrokerConfig,
+async fn run_online_plus_order_schedule(
+    broker: online_plus_broker::OnlinePlusBrokerConfig,
     order_json: String,
     order_index: usize,
     total_orders: usize,
@@ -1114,7 +1333,7 @@ async fn run_standard_order_schedule(
             ),
         );
 
-        match standard_broker::send_order(
+        match online_plus_broker::send_order(
             &broker,
             &order_json,
             test_mode,
@@ -1149,8 +1368,8 @@ async fn run_standard_order_schedule(
     Ok(())
 }
 
-async fn run_standard_order_scheduled_task(
-    broker: standard_broker::StandardBrokerConfig,
+async fn run_online_plus_order_scheduled_task(
+    broker: online_plus_broker::OnlinePlusBrokerConfig,
     order_json: String,
     order_index: usize,
     total_orders: usize,
@@ -1212,7 +1431,7 @@ async fn run_standard_order_scheduled_task(
         }
 
         let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
-            let summary = standard_broker::run_calibration(
+            let summary = online_plus_broker::run_calibration(
                 &broker,
                 &client,
                 rate_limiter.as_ref(),
@@ -1286,7 +1505,7 @@ async fn run_standard_order_scheduled_task(
             ),
         );
 
-        run_standard_order_schedule(
+        run_online_plus_order_schedule(
             broker.clone(),
             order_json.clone(),
             order_index,
@@ -1300,8 +1519,8 @@ async fn run_standard_order_scheduled_task(
     }
 }
 
-async fn run_standard_order_continuous(
-    broker: standard_broker::StandardBrokerConfig,
+async fn run_online_plus_order_continuous(
+    broker: online_plus_broker::OnlinePlusBrokerConfig,
     order_json: String,
     order_index: usize,
     total_orders: usize,
@@ -1321,7 +1540,7 @@ async fn run_standard_order_continuous(
             }
             last_start = Some(std::time::Instant::now());
 
-            match standard_broker::send_order(
+            match online_plus_broker::send_order(
                 &broker,
                 &order_json,
                 test_mode,
@@ -1653,9 +1872,301 @@ async fn run_exir_order_continuous(
     }
 }
 
+async fn run_easy_trader_order_schedule(
+    broker: easy_trader::EasyTraderBrokerConfig,
+    order: easy_trader::EasyTraderOrderData,
+    order_index: usize,
+    total_orders: usize,
+    final_send_epoch_ms: i64,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    let mut last_wall_epoch_ms = current_epoch_millis()?;
+    for repeat_index in 0..broker.batch_repeat {
+        let scheduled_epoch_ms =
+            final_send_epoch_ms + repeat_index as i64 * broker.batch_delay_ms as i64;
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms > scheduled_epoch_ms {
+            log_warn(
+                &broker.name,
+                &format!(
+                    "Order {}/{} scheduled send time passed by {}ms for batch #{}",
+                    order_index + 1,
+                    total_orders,
+                    now_epoch_ms - scheduled_epoch_ms,
+                    repeat_index + 1
+                ),
+            );
+        }
+        wait_until_epoch_ms(scheduled_epoch_ms, &mut last_wall_epoch_ms).await?;
+
+        let actual_send_time = time_reference::now_utc().with_timezone(&Tehran);
+        let actual_epoch_us = current_epoch_micros()?;
+        let drift_micros = actual_epoch_us - scheduled_epoch_ms as i128 * 1_000;
+        log_info(
+            &broker.name,
+            &format!(
+                "Sending scheduled batch #{} order {}/{} at {} (drift {}µs, epoch_us={})",
+                repeat_index + 1,
+                order_index + 1,
+                total_orders,
+                actual_send_time.format("%H:%M:%S%.3f"),
+                drift_micros,
+                actual_epoch_us
+            ),
+        );
+
+        match easy_trader::send_order(
+            &broker,
+            &order,
+            test_mode,
+            curl_only,
+            Some(rate_limiter.as_ref()),
+        )
+        .await
+        {
+            Ok(_) => log_success(
+                &broker.name,
+                &format!(
+                    "Batch {}/{} Order {}/{} sent",
+                    repeat_index + 1,
+                    broker.batch_repeat,
+                    order_index + 1,
+                    total_orders
+                ),
+            ),
+            Err(e) => log_error(
+                &broker.name,
+                &format!(
+                    "Batch {}/{} Order {}/{} failed: {}",
+                    repeat_index + 1,
+                    broker.batch_repeat,
+                    order_index + 1,
+                    total_orders,
+                    e
+                ),
+            ),
+        }
+    }
+    Ok(())
+}
+
+async fn run_easy_trader_order_scheduled_task(
+    broker: easy_trader::EasyTraderBrokerConfig,
+    order: easy_trader::EasyTraderOrderData,
+    order_index: usize,
+    total_orders: usize,
+    target_time: chrono::NaiveTime,
+    test_mode: bool,
+    curl_only: bool,
+) -> Result<()> {
+    let calibration_enabled = broker
+        .calibration
+        .as_ref()
+        .map_or(false, |calibration| calibration.enabled);
+    let client = reqwest::Client::new();
+    let rate_limiter = std::sync::Arc::new(rate_limiter::RateLimiter::new(broker.batch_delay_ms));
+
+    loop {
+        let target_datetime = next_target_datetime(target_time)?;
+        let target_epoch_ms = target_datetime.timestamp_millis();
+        let now_epoch_ms = current_epoch_millis()?;
+        if now_epoch_ms < target_epoch_ms {
+            log_info(
+                &broker.name,
+                &format!(
+                    "Next target_time={} (epoch_ms={})",
+                    target_datetime.format("%Y-%m-%d %H:%M:%S%.3f"),
+                    target_epoch_ms
+                ),
+            );
+        }
+
+        let mut calibration_deadline_epoch_ms = None;
+        if calibration_enabled {
+            let calibration = broker
+                .calibration
+                .as_ref()
+                .context("Calibration config missing")?;
+            let calibration_deadline =
+                target_epoch_ms - calibration.calibration_start_margin_ms as i64;
+            calibration_deadline_epoch_ms = Some(calibration_deadline);
+            let calibration_start_epoch_ms =
+                calibration_deadline - calibration.calibration_window_ms as i64;
+            if now_epoch_ms < calibration_start_epoch_ms {
+                let sleep_ms = calibration_start_epoch_ms - now_epoch_ms;
+                log_info(
+                    &broker.name,
+                    &format!(
+                        "Waiting {}ms before calibration window (epoch_ms={})",
+                        sleep_ms, calibration_start_epoch_ms
+                    ),
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(sleep_ms as u64)).await;
+            }
+            let now_epoch_ms = current_epoch_millis()?;
+            if now_epoch_ms > calibration_deadline {
+                log_warn(
+                    &broker.name,
+                    "Too late to calibrate before target_time; proceeding with available data",
+                );
+            }
+        }
+
+        let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
+            let summary = easy_trader::run_calibration(
+                &broker,
+                &client,
+                rate_limiter.as_ref(),
+                calibration_deadline_epoch_ms,
+            )
+            .await?;
+            (
+                summary.estimated_delay_ms,
+                broker
+                    .calibration
+                    .as_ref()
+                    .map(|calibration| calibration.safety_margin_ms)
+                    .unwrap_or_default(),
+                summary.last_probe_wall_time,
+            )
+        } else {
+            log_info(
+                &broker.name,
+                "Calibration disabled; using zero delay estimate.",
+            );
+            (0, 0, time_reference::now_system_time())
+        };
+
+        let effective_delay_ms = estimated_delay_ms + safety_margin_ms;
+        let final_send_epoch_ms = target_epoch_ms - effective_delay_ms as i64;
+        let final_send_time = chrono::DateTime::<chrono::Utc>::from(
+            std::time::UNIX_EPOCH + std::time::Duration::from_millis(final_send_epoch_ms as u64),
+        )
+        .with_timezone(&Tehran);
+
+        let now_epoch_ms = current_epoch_millis()?;
+        if final_send_epoch_ms <= now_epoch_ms {
+            log_warn(
+                &broker.name,
+                "final_send_time has already passed; sending as soon as possible",
+            );
+        }
+
+        if calibration_enabled {
+            let last_probe_epoch_ms = last_probe_wall_time
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as i64;
+            let gap_ms = final_send_epoch_ms - last_probe_epoch_ms;
+            if gap_ms < broker.batch_delay_ms as i64 {
+                log_warn(
+                    &broker.name,
+                    &format!(
+                        "Last probe is too close to final_send_time; gap {}ms < {}ms",
+                        gap_ms, broker.batch_delay_ms
+                    ),
+                );
+            }
+        }
+
+        log_info(
+            &broker.name,
+            &format!(
+                "target_time={} final_send_time={} estimator_delay={}ms safety_margin={}ms effective_delay={}ms",
+                target_datetime.format("%H:%M:%S%.3f"),
+                final_send_time.format("%H:%M:%S%.3f"),
+                estimated_delay_ms,
+                safety_margin_ms,
+                effective_delay_ms
+            ),
+        );
+        log_info(
+            &broker.name,
+            &format!(
+                "target_epoch_ms={} final_send_epoch_ms={}",
+                target_epoch_ms, final_send_epoch_ms
+            ),
+        );
+
+        run_easy_trader_order_schedule(
+            broker.clone(),
+            order.clone(),
+            order_index,
+            total_orders,
+            final_send_epoch_ms,
+            test_mode,
+            curl_only,
+            rate_limiter.clone(),
+        )
+        .await?;
+    }
+}
+
+async fn run_easy_trader_order_continuous(
+    broker: easy_trader::EasyTraderBrokerConfig,
+    order: easy_trader::EasyTraderOrderData,
+    order_index: usize,
+    total_orders: usize,
+    test_mode: bool,
+    curl_only: bool,
+    rate_limiter: std::sync::Arc<rate_limiter::RateLimiter>,
+) -> Result<()> {
+    let mut last_start: Option<std::time::Instant> = None;
+    loop {
+        for repeat_index in 0..broker.batch_repeat {
+            if let Some(previous_start) = last_start {
+                let elapsed = previous_start.elapsed();
+                let delay = std::time::Duration::from_millis(broker.batch_delay_ms);
+                if elapsed < delay {
+                    tokio::time::sleep(delay - elapsed).await;
+                }
+            }
+            last_start = Some(std::time::Instant::now());
+
+            match easy_trader::send_order(
+                &broker,
+                &order,
+                test_mode,
+                curl_only,
+                Some(rate_limiter.as_ref()),
+            )
+            .await
+            {
+                Ok(_) => log_success(
+                    &broker.name,
+                    &format!(
+                        "Batch {}/{} Order {}/{} sent",
+                        repeat_index + 1,
+                        broker.batch_repeat,
+                        order_index + 1,
+                        total_orders
+                    ),
+                ),
+                Err(e) => log_error(
+                    &broker.name,
+                    &format!(
+                        "Batch {}/{} Order {}/{} failed: {}",
+                        repeat_index + 1,
+                        broker.batch_repeat,
+                        order_index + 1,
+                        total_orders,
+                        e
+                    ),
+                ),
+            }
+
+            if test_mode {
+                log_info(&broker.name, "Test mode: exiting after one batch cycle");
+                return Ok(());
+            }
+        }
+    }
+}
+
 async fn run_mofid_order_schedule(
-    config: mofid::MofidConfig,
-    order: mofid::MofidOrderData,
+    config: mofid_online_plus::MofidOnlinePlusConfig,
+    order: mofid_online_plus::MofidOnlinePlusOrderData,
     label: String,
     order_index: usize,
     total_orders: usize,
@@ -1699,7 +2210,7 @@ async fn run_mofid_order_schedule(
             ),
         );
 
-        match mofid::send_order(
+        match mofid_online_plus::send_order(
             &config,
             &order,
             test_mode,
@@ -1735,8 +2246,8 @@ async fn run_mofid_order_schedule(
 }
 
 async fn run_mofid_order_scheduled_task(
-    config: mofid::MofidConfig,
-    order: mofid::MofidOrderData,
+    config: mofid_online_plus::MofidOnlinePlusConfig,
+    order: mofid_online_plus::MofidOnlinePlusOrderData,
     label: String,
     order_index: usize,
     total_orders: usize,
@@ -1798,7 +2309,7 @@ async fn run_mofid_order_scheduled_task(
         }
 
         let (estimated_delay_ms, safety_margin_ms, last_probe_wall_time) = if calibration_enabled {
-            let summary = mofid::run_calibration(
+            let summary = mofid_online_plus::run_calibration(
                 &config,
                 &client,
                 rate_limiter.as_ref(),
@@ -1885,8 +2396,8 @@ async fn run_mofid_order_scheduled_task(
 }
 
 async fn run_mofid_order_continuous(
-    config: mofid::MofidConfig,
-    order: mofid::MofidOrderData,
+    config: mofid_online_plus::MofidOnlinePlusConfig,
+    order: mofid_online_plus::MofidOnlinePlusOrderData,
     label: String,
     order_index: usize,
     total_orders: usize,
@@ -1906,7 +2417,7 @@ async fn run_mofid_order_continuous(
             }
             last_start = Some(std::time::Instant::now());
 
-            match mofid::send_order(
+            match mofid_online_plus::send_order(
                 &config,
                 &order,
                 test_mode,

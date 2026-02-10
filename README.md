@@ -4,9 +4,10 @@ A Rust application that automatically sends trading orders to Iranian stock brok
 
 ## Supported Brokers
 
-- **Mofid Online** (mofid) - https://tg.mofidonline.com
+- **MofidOnlinePlus** (mofid_online_plus) - https://tg.mofidonline.com
 - **Danayan** (danayan) - https://trader.danayan.broker
-- **Standard Brokers** (standard) - configurable via `config_standard.json`
+- **Online Plus Brokers** (online_plus) - configurable via `config_online_plus.json`
+- **Easy Trader** (easy_trader) - configurable via `config_easy_trader.json`
 - **Exir Brokers** (exir) - configurable via `config_exir.json`
 - **Bidar Trader** (bidar) - https://bidartrader.ir
 
@@ -32,14 +33,17 @@ A Rust application that automatically sends trading orders to Iranian stock brok
 ### 1. Copy the example config for your broker:
 
 ```bash
-# For Mofid Online
-cp config_mofid.example.json config_mofid.json
+# For MofidOnlinePlus
+cp config_mofid_online_plus.example.json config_mofid_online_plus.json
 
 # For Danayan
 cp config_danayan.example.json config_danayan.json
 
-# For Standard brokers
-cp config_standard.example.json config_standard.json
+# For Online Plus brokers
+cp config_online_plus.example.json config_online_plus.json
+
+# For Easy Trader
+cp config_easy_trader.example.json config_easy_trader.json
 
 # For Exir brokers
 cp config_exir.example.json config_exir.json
@@ -60,14 +64,17 @@ See [Authentication Guide](#authentication-guide) below.
 ```bash
 cargo build --release
 
-# For Mofid Online
-cargo run --release -- mofid
+# For MofidOnlinePlus
+cargo run --release -- mofid_online_plus
 
 # For Danayan
 cargo run --release -- danayan
 
-# For Standard brokers
-cargo run --release -- standard
+# For Online Plus brokers
+cargo run --release -- online_plus
+
+# For Easy Trader
+cargo run --release -- easy_trader
 
 # For Exir brokers
 cargo run --release -- exir
@@ -99,9 +106,9 @@ system clock reference for scheduled orders.
 }
 ```
 
-### Mofid Online (`config_mofid.json`)
+### MofidOnlinePlus (`config_mofid_online_plus.json`)
 
-You can provide a single account object (backwards compatible) or an `accounts` array for multiple Mofid accounts.
+You can provide a single account object  or an `accounts` array for multiple MofidOnlinePlus accounts.
 
 ```json
 {
@@ -129,7 +136,7 @@ You can provide a single account object (backwards compatible) or an `accounts` 
 }
 ```
 
-#### Mofid Order Parameters
+#### MofidOnlinePlus Order Parameters
 
 | Field | Description |
 |-------|-------------|
@@ -141,9 +148,9 @@ You can provide a single account object (backwards compatible) or an `accounts` 
 | `validityDate` | `null` for day orders |
 | `orderFrom` | Platform identifier (`"Titan"`) |
 
-### Standard Brokers (`config_standard.json`)
+### Online Plus Brokers (`config_online_plus.json`)
 
-You can provide a single account object (backwards compatible) or an `accounts` array for multiple standard brokers.
+You can provide a single account object  or an `accounts` array for multiple Online Plus brokers.
 
 ```json
 {
@@ -181,7 +188,7 @@ You can provide a single account object (backwards compatible) or an `accounts` 
 }
 ```
 
-#### Standard Order Parameters
+#### Online Plus Order Parameters
 
 | Field | Description |
 |-------|-------------|
@@ -194,6 +201,79 @@ You can provide a single account object (backwards compatible) or an `accounts` 
 | `FinancialProviderId` | Usually `1` |
 | `minimumQuantity` | Minimum fill quantity (`0` for any) |
 | `maxShow` | Max visible quantity (`0` for all) |
+
+### Easy Trader (`config_easy_trader.json`)
+
+You can provide a single account object  or an `accounts` array for multiple Easy Trader accounts.
+
+```json
+{
+  "accounts": [
+    {
+      "name": "easy_trader",
+      "authorization": "YOUR_BEARER_TOKEN",
+      "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+      "order_url": "https://api-mts.orbis.easytrader.ir/core/api/v2/order",
+      "batch_delay_ms": 100,
+      "orders": [
+        {
+          "price": 3432,
+          "quantity": 400000,
+          "side": 0,
+          "validityType": 0,
+          "symbolIsin": "IRO1SPHR0001",
+          "orderModelType": 1,
+          "orderFrom": 34
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Easy Trader Order Parameters
+
+| Field | Description |
+|-------|-------------|
+| `side` | `0` for Buy, `1` for Sell |
+| `price` | Order price |
+| `quantity` | Number of shares |
+| `symbolIsin` | Stock ISIN code |
+| `validityType` | Usually `0` for day order |
+| `orderModelType` | Usually `1` for limit order |
+| `orderFrom` | Platform identifier (example: `34`) |
+
+Buy payload sent by Sarkhati:
+
+```json
+{
+  "order": {
+    "price": 3432,
+    "quantity": 400000,
+    "side": 0,
+    "validityType": 0,
+    "symbolIsin": "IRO1SPHR0001",
+    "orderModelType": 1,
+    "orderFrom": 34
+  }
+}
+```
+
+Sell payload example (only `side` changes to `1`):
+
+```json
+{
+  "order": {
+    "price": 3432,
+    "quantity": 400000,
+    "side": 1,
+    "validityType": 0,
+    "symbolIsin": "IRO1SPHR0001",
+    "orderModelType": 1,
+    "orderFrom": 34
+  }
+}
+```
 
 ### Exir Brokers (`config_exir.json`)
 
@@ -247,7 +327,7 @@ You can provide a single account object (backwards compatible) or an `accounts` 
 
 ### Danayan (`config_danayan.json`)
 
-You can provide a single account object (backwards compatible) or an `accounts` array for multiple Danayan accounts.
+You can provide a single account object  or an `accounts` array for multiple Danayan accounts.
 
 ```json
 {
@@ -288,7 +368,7 @@ You can provide a single account object (backwards compatible) or an `accounts` 
 
 ### Bidar Trader (`config_bidar.json`)
 
-You can provide a single account object (backwards compatible) or an `accounts` array for multiple Bidar accounts.
+You can provide a single account object  or an `accounts` array for multiple Bidar accounts.
 
 ```json
 {
@@ -328,9 +408,9 @@ You can provide a single account object (backwards compatible) or an `accounts` 
 
 ## Authentication Guide
 
-### Mofid Online
+### MofidOnlinePlus
 
-Mofid supports both **Cookie** and **Bearer token** authentication.
+MofidOnlinePlus supports both **Cookie** and **Bearer token** authentication.
 
 #### Option A: Bearer Token (Recommended)
 
@@ -341,7 +421,7 @@ Mofid supports both **Cookie** and **Bearer token** authentication.
 5. Look for requests to `mofidonline.com/apigateway`
 6. Find the `Authorization` header in Request Headers
 7. Copy everything after `Bearer ` (just the token)
-8. Paste in `config_mofid.json` → `authorization` field
+8. Paste in `config_mofid_online_plus.json` → `authorization` field
 
 #### Option B: Cookie
 
@@ -351,7 +431,7 @@ Mofid supports both **Cookie** and **Bearer token** authentication.
 4. Click on a request to `tg.mofidonline.com`
 5. Find `Cookie:` in Request Headers
 6. Copy the entire cookie string
-7. Paste in `config_mofid.json` → `cookie` field
+7. Paste in `config_mofid_online_plus.json` → `cookie` field
 
 ### Danayan
 
@@ -365,15 +445,25 @@ Danayan uses **Cookie** authentication (contains embedded Authorization token).
 6. Copy the entire cookie string (includes `Authorization=Bearer%20...`)
 7. Paste in `config_danayan.json` → `cookie` field
 
-### Standard Brokers
+### Online Plus Brokers
 
-Standard brokers use **Cookie** authentication only.
+Online Plus brokers use **Cookie** authentication only.
 
 1. Open your broker's trading web app
 2. Log in with your credentials
 3. Press `F12` → **Network** tab
 4. Find the order API request and copy the `Cookie:` header
-5. Paste in `config_standard.json` → `cookie` field
+5. Paste in `config_online_plus.json` → `cookie` field
+
+### Easy Trader
+
+Easy Trader uses **Bearer token** authentication.
+
+1. Open Easy Trader web app and log in
+2. Press `F12` → **Network** tab
+3. Find requests to `api-mts.orbis.easytrader.ir`
+4. Copy `Authorization: Bearer ...` token value
+5. Paste in `config_easy_trader.json` → `authorization` field
 
 ### Exir Brokers
 
@@ -434,14 +524,17 @@ Bidar Trader uses **Bearer token** authentication.
 # Build
 cargo build --release
 
-# Run for Mofid Online
-cargo run --release -- mofid
+# Run for MofidOnlinePlus
+cargo run --release -- mofid_online_plus
 
 # Run for Danayan
 cargo run --release -- danayan
 
-# Run for Standard brokers
-cargo run --release -- standard
+# Run for Online Plus brokers
+cargo run --release -- online_plus
+
+# Run for Easy Trader
+cargo run --release -- easy_trader
 
 # Run for Exir brokers
 cargo run --release -- exir
@@ -459,7 +552,7 @@ Add `test` argument to run the loop only once (useful for testing configuration)
 
 ```bash
 # Test single broker (runs once and exits)
-cargo run --release -- mofid test
+cargo run --release -- mofid_online_plus test
 
 # Test all brokers (each runs once and exits)
 cargo run --release -- all test
@@ -469,17 +562,17 @@ Test mode output:
 ```
 *** TEST MODE: Loop will run only once ***
 
-Starting Sarkhati - Mofid Online Order Sender
+Starting Sarkhati - MofidOnlinePlus Order Sender
 ...
 === Batch #1: Sending 1 orders ===
 ✓ Batch #1, Order #1: Sent successfully
-[Mofid] Test mode: exiting after one batch
+[MofidOnlinePlus] Test mode: exiting after one batch
 ```
 
 ### Expected Output
 
 ```
-Starting Sarkhati - Mofid Online Order Sender
+Starting Sarkhati - MofidOnlinePlus Order Sender
 Using Authorization header
 Authorization preview: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6...
 Loaded 1 order(s) from config

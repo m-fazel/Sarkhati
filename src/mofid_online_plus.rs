@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct MofidConfig {
+pub struct MofidOnlinePlusConfig {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -22,7 +22,7 @@ pub struct MofidConfig {
     pub user_agent: String,
     #[serde(default = "default_order_url")]
     pub order_url: String,
-    pub orders: Vec<MofidOrderData>,
+    pub orders: Vec<MofidOnlinePlusOrderData>,
     #[serde(default = "default_batch_delay")]
     pub batch_delay_ms: u64,
     #[serde(default = "default_batch_repeat")]
@@ -35,13 +35,15 @@ pub struct MofidConfig {
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum MofidConfigFile {
-    Single(MofidConfig),
-    Multiple { accounts: Vec<MofidConfig> },
-    List(Vec<MofidConfig>),
+pub enum MofidOnlinePlusConfigFile {
+    Single(MofidOnlinePlusConfig),
+    Multiple {
+        accounts: Vec<MofidOnlinePlusConfig>,
+    },
+    List(Vec<MofidOnlinePlusConfig>),
 }
 
-impl MofidConfig {
+impl MofidOnlinePlusConfig {
     pub fn display_name(&self, fallback: &str) -> String {
         self.name
             .as_deref()
@@ -68,7 +70,7 @@ fn default_batch_repeat() -> usize {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct MofidOrderData {
+pub struct MofidOnlinePlusOrderData {
     #[serde(rename = "orderSide")]
     pub order_side: String,
     pub price: i64,
@@ -84,8 +86,8 @@ pub struct MofidOrderData {
 }
 
 pub async fn send_order(
-    config: &MofidConfig,
-    order: &MofidOrderData,
+    config: &MofidOnlinePlusConfig,
+    order: &MofidOnlinePlusOrderData,
     test_mode: bool,
     curl_only: bool,
     rate_limiter: Option<&RateLimiter>,
@@ -108,7 +110,7 @@ pub async fn send_order(
             let auth_value = format!("Bearer {}", token);
             format!("-H 'Authorization: {}'", auth_value)
         };
-        log_info("Mofid", "Equivalent curl command:");
+        log_info("MofidOnlinePlus", "Equivalent curl command:");
         log_raw_stdout(&format!(
             r#"curl '{}' \
   --compressed \
@@ -216,7 +218,7 @@ pub async fn send_order(
         .name
         .as_deref()
         .filter(|name| !name.is_empty())
-        .unwrap_or("Mofid");
+        .unwrap_or("MofidOnlinePlus");
     log_info(label, &format!("Order response status: {}", status));
 
     if !status.is_success() {
@@ -227,7 +229,7 @@ pub async fn send_order(
 }
 
 pub async fn run_calibration(
-    config: &MofidConfig,
+    config: &MofidOnlinePlusConfig,
     client: &reqwest::Client,
     rate_limiter: &RateLimiter,
     deadline_epoch_ms: Option<i64>,
@@ -238,7 +240,7 @@ pub async fn run_calibration(
         .context("Calibration config missing")?;
 
     calibration::run_calibration(
-        "[Mofid]",
+        "[MofidOnlinePlus]",
         calibration,
         rate_limiter,
         deadline_epoch_ms,
@@ -249,7 +251,7 @@ pub async fn run_calibration(
 
 async fn send_probe(
     client: &reqwest::Client,
-    config: &MofidConfig,
+    config: &MofidOnlinePlusConfig,
 ) -> Result<(u64, u128, StatusCode)> {
     let t0 = Instant::now();
 

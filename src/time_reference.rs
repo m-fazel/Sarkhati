@@ -12,20 +12,33 @@ static CLOCK_OFFSET_MS: OnceLock<i64> = OnceLock::new();
 
 pub async fn initialize(ntp: Option<&NtpConfig>) -> Result<()> {
     if let Some(ntp) = ntp {
-        let offset_ms = query_ntp_offset_ms(&ntp.server, ntp.timeout_ms).await?;
-        if CLOCK_OFFSET_MS.set(offset_ms).is_err() {
-            log_warn(
-                "Time",
-                "Clock offset already initialized; keeping existing value.",
-            );
-        } else {
-            log_info(
-                "Time",
-                &format!(
-                    "NTP sync complete: server={} offset={}ms",
-                    ntp.server, offset_ms
-                ),
-            );
+        match query_ntp_offset_ms(&ntp.server, ntp.timeout_ms).await {
+            Ok(offset_ms) => {
+                if CLOCK_OFFSET_MS.set(offset_ms).is_err() {
+                    log_warn(
+                        "Time",
+                        "Clock offset already initialized; keeping existing value.",
+                    );
+                } else {
+                    log_info(
+                        "Time",
+                        &format!(
+                            "NTP sync complete: server={} offset={}ms",
+                            ntp.server, offset_ms
+                        ),
+                    );
+                }
+            }
+            Err(err) => {
+                log_warn(
+                    "Time",
+                    &format!(
+                        "NTP sync failed for server={}: {}. Falling back to local system clock.",
+                        ntp.server, err
+                    ),
+                );
+                let _ = CLOCK_OFFSET_MS.set(0);
+            }
         }
     }
     Ok(())

@@ -576,7 +576,7 @@ Starting Sarkhati - MofidOnlinePlus Order Sender
 Using Authorization header
 Authorization preview: Bearer eyJhbGciOiJSUzI1NiIsImtpZCI6...
 Loaded 1 order(s) from config
-Batch delay: 100ms between batches
+Batch delay: 100ms between scheduled repeats (measured from each repeat start time; next repeat does not wait for the previous response)
 Starting continuous order sending...
 
 === Batch #1: Sending 1 orders ===
